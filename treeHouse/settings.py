@@ -41,11 +41,23 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "django.contrib.sites", 
+	
+    "authentication",
 
     'rest_framework',
     'rest_framework.authtoken',
+    'dj_rest_auth',
+    
+    'allauth',
+    'allauth.account',
+    'dj_rest_auth.registration',
+
+    'allauth.socialaccount',
 
 ]
+
+SITE_ID = 1
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -55,6 +67,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+	
 ]
 
 ROOT_URLCONF = 'treeHouse.urls'
@@ -112,6 +125,22 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+    ]
+}
+
+REST_AUTH = {
+    'REGISTER_SERIALIZER': 'authentication.serializers.CustomRegisterSerializer',
+    'USER_DETAILS_SERIALIZER': 'authentication.serializers.CustomUserDetailsSerializer',
+    # 'PASSWORD_RESET_SERIALIZER': 'authentication.serializers.CustomPasswordResetSerializer'
+}
+
+ACCOUNT_ADAPTER = 'authentication.adapter.CustomAccountAdapter'
+AUTH_USER_MODEL = 'authentication.CustomUser'
+
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/
