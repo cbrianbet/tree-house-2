@@ -10,6 +10,7 @@ from authentication.views import email_confirm_redirect, password_reset_confirm_
 from dj_rest_auth.registration.views import RegisterView
 from dj_rest_auth.views import LoginView, LogoutView, UserDetailsView
 from django.urls import path
+from .views import role_list, role_detail
 
 
 urlpatterns = [
@@ -30,4 +31,8 @@ urlpatterns = [
         name="password_reset_confirm",
     ),
     path("password/reset/confirm/", PasswordResetConfirmView.as_view(), name="password_reset_confirm"),
+
+    path('roles/', role_list, name='role-list'),
+	path('roles/<int:pk>/', role_detail, name='role-detail'),
+
 ]
