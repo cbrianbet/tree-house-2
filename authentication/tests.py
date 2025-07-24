@@ -13,7 +13,7 @@ class RoleAPITests(APITestCase):
         self.role = Role.objects.create(name="Admin", description="Administrator role")
         self.user = User.objects.create_user(username="testuser", password="testpass", role=self.role)
         self.token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION='Token ' + self.token.key)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
 
     def test_role_list_get(self):
         url = reverse('role-list')
