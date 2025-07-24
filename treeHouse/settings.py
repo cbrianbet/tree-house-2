@@ -141,6 +141,8 @@ ACCOUNT_ADAPTER = 'authentication.adapter.CustomAccountAdapter'
 AUTH_USER_MODEL = 'authentication.CustomUser'
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+EMAIL_CONFIRM_REDIRECT_BASE_URL = os.getenv("EMAIL_CONFIRM_REDIRECT_BASE_URL", "http://localhost:8000/email-confirm/")
+PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL = os.getenv("PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL",
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/
