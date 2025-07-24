@@ -28,6 +28,14 @@ class RoleAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['name'], "Editor")
 
+    def test_role_list_post_invalid_data(self):
+        url = reverse('role-list')
+        # Missing required 'name' field
+        data = {"description": "Missing name"}
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('name', response.data)
+
     def test_role_detail_get(self):
         url = reverse('role-detail', args=[self.role.id])
         response = self.client.get(url)
