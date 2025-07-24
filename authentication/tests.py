@@ -55,6 +55,12 @@ class RoleAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Role.objects.filter(id=self.role.id).exists())
 
+    def test_role_detail_delete_nonexistent(self):
+        non_existent_id = self.role.id + 9999
+        url = reverse('role-detail', args=[non_existent_id])
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
 
 class RegistrationTestCase(APITestCase):
     def setUp(self):
