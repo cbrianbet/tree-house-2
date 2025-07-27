@@ -8,7 +8,6 @@ from authentication.models import CustomUser, Role
 
 
 def is_landlord(user):
-    print(hasattr(user, 'role'),user.role.name)
     return user.is_authenticated and hasattr(user, 'role') and user.role.name == 'landlord'
 
 
