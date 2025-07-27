@@ -6,7 +6,6 @@ class Property(models.Model):
 	owner = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
 	name = models.CharField(max_length=255)
 	description = models.TextField(blank=True)
-	created_at = models.DateTimeField(auto_now_add=True)
 	longitude = models.FloatField(null=True, blank=True)
 	latitude = models.FloatField(null=True, blank=True)
 	property_type = models.CharField(max_length=50, choices=[
