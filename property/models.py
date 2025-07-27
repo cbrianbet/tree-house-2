@@ -44,6 +44,7 @@ class Unit(models.Model):
 	bathrooms = models.PositiveIntegerField(default=0)
 	parking_space = models.BooleanField(default=False)
 	parking_slots = models.PositiveIntegerField(default=0)
+	is_public = models.BooleanField(default=False)
 	price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 	service_charge = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 	security_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
