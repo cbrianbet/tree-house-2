@@ -19,7 +19,6 @@ def is_admin(user):
 @permission_classes([IsAuthenticated])
 def property_list_create(request):
     if request.method == 'GET':
-        print("User:", request.user)
         if is_admin(request.user):
             properties = Property.objects.all()
         else:
