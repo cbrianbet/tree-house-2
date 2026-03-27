@@ -1,6 +1,6 @@
 from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
-from .models import Role
+from .models import Role, TenantProfile, LandlordProfile, AgentProfile
 
 from dj_rest_auth.registration.serializers import RegisterSerializer
 
@@ -40,3 +40,21 @@ class RoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Role
         fields = ['id', 'name', 'description']
+
+
+class TenantProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantProfile
+        fields = ['id', 'user', 'national_id', 'emergency_contact_name', 'emergency_contact_phone']
+
+
+class LandlordProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LandlordProfile
+        fields = ['id', 'user', 'company_name', 'tax_id', 'verified']
+
+
+class AgentProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentProfile
+        fields = ['id', 'user', 'agency_name', 'license_number', 'commission_rate']
