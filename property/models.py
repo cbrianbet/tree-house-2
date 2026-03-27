@@ -81,3 +81,16 @@ class PropertyImage(models.Model):
 
 	def __str__(self):
 		return f"Image for {self.property.name}"
+
+
+class PropertyAgent(models.Model):
+	property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='property_agents')
+	agent = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='managed_properties')
+	appointed_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='appointed_agents')
+	appointed_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		unique_together = ('property', 'agent')
+
+	def __str__(self):
+		return f"{self.agent.username} manages {self.property.name}"

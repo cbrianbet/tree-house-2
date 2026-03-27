@@ -91,9 +91,53 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 | GET | `/api/redoc/` | ReDoc |
 | GET | `/api/schema/` | OpenAPI schema download |
 
-## Conventions
-- Views are function-based using `@api_view` and `@permission_classes([IsAuthenticated])`
-- All profile views share logic via `_profile_list_view` / `_profile_detail_view` factory functions in `views.py`
-- PUT on detail endpoints uses `partial=True` (no need to send all fields)
-- Migrations are written manually (psycopg2 won't build from source in this venv)
-- Data migrations use `get_or_create` so they're safe to run multiple times
+## Coding Conventions
+
+### Views
+- Always use function-based views with `@api_view` and `@permission_classes([IsAuthenticated])`
+- Never use class-based views unless integrating a third-party library that requires it
+- PUT endpoints always use `partial=True` on the serializer — callers only send what they want to change
+- Shared view logic goes in factory functions (see `_profile_list_view` / `_profile_detail_view` pattern)
+- Always add `@extend_schema` with `OpenApiExample` when writing a new view — request body examples are required
+
+### Models
+- New domain entities that are role-specific get their own profile table as a `OneToOneField` to `CustomUser`
+- Always define `__str__` on every model
+- List queries on related models use `select_related` to avoid N+1 queries
+
+### Migrations
+- Always write migrations manually — psycopg2 won't build from source in this venv so `makemigrations` can't run
+- Seed/reference data goes in a data migration, not fixtures
+- Data migrations always use `get_or_create` so they're safe to re-run
+- Name migrations descriptively: `0003_add_profile_models`, `0004_seed_roles`
+
+### Serializers
+- Use `ModelSerializer` for all models
+- Explicitly list `fields` — never use `fields = '__all__'`
+
+### Tests
+- Every new endpoint gets tests covering: list, create, retrieve, update, delete, and 404
+- Each test class has a `setUp` that creates a role, user, and token, and sets client credentials
+- Tests live in the app's `tests.py`
+
+---
+
+## Workflow Rules
+
+### Before building new models
+- Show a DB diagram first and get sign-off before writing any code
+- Identify how the new model relates to `CustomUser` and existing models before proposing fields
+
+### Before building new endpoints
+- Confirm the URL structure and HTTP methods first
+- New endpoints always ship with: serializer + view + URL pattern + swagger example + tests — all in one go
+
+### Migrations
+- Never run `makemigrations` — write migration files by hand
+- Schema migration and data migration always go in separate files
+
+### General
+- Read a file before editing it
+- Don't add new Django apps without confirming with the user first
+- Keep `authentication/` concerns separate from other apps — no cross-app model imports
+- Don't add error handling for impossible cases — only validate at system boundaries
