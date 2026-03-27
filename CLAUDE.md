@@ -1,7 +1,7 @@
 # Tree House 2 — CLAUDE.md
 
 ## Project Overview
-Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin roles) with role-specific profiles. More domain models (properties, leases, payments) to come.
+Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin roles) with role-specific profiles. Agents are appointed by landlords to manage specific properties. Payments and maintenance requests to come.
 
 ## Tech Stack
 - **Django 4.2** + **Django REST Framework**
@@ -36,8 +36,8 @@ DB connects via Supabase transaction pooler (`aws-1-eu-west-1.pooler.supabase.co
 python manage.py runserver          # start dev server (default port 8000)
 python manage.py runserver 8001     # use alternate port if 8000 is taken
 python manage.py migrate            # apply migrations
-python manage.py makemigrations authentication --name="<name>"
 python manage.py test authentication
+python manage.py test property
 ```
 
 Kill port 8000 if already in use:
@@ -48,13 +48,19 @@ lsof -ti:8000 | xargs kill -9
 ## Project Structure
 ```
 treeHouse/          # project config (settings, urls, wsgi)
-authentication/     # main app
+authentication/     # user management app
   models.py         # Role, CustomUser, TenantProfile, LandlordProfile, AgentProfile
   serializers.py    # serializers for all models
   views.py          # function-based views using @api_view
-  urls.py           # all URL patterns
+  urls.py           # all URL patterns under /api/auth/
   adapter.py        # CustomAccountAdapter — saves extra fields on registration
-  migrations/       # includes data migration (0004) that seeds the 4 roles
+  migrations/       # 0004 seeds the 4 roles via data migration
+property/           # property management app
+  models.py         # Property, Unit, Lease, PropertyImage, PropertyAgent
+  serializers.py    # serializers for all models
+  views.py          # CRUD views + permission helpers (is_landlord, is_admin, is_agent_for)
+  urls.py           # all URL patterns under /api/property/
+  migrations/       # 0005 adds PropertyAgent
 templates/          # Django templates directory
 ```
 
@@ -71,13 +77,15 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 - **Tenant** — has `TenantProfile` (national_id, emergency_contact_name, emergency_contact_phone)
 
 ## API Endpoints
+
+### Auth (`/api/auth/`)
 | Method | URL | Description |
 |--------|-----|-------------|
 | POST | `/api/auth/register/` | Register new user |
 | POST | `/api/auth/login/` | Login, returns token |
 | POST | `/api/auth/logout/` | Logout |
 | GET | `/api/auth/user/` | Current user details |
-| POST | `/api/auth/password/reset/` | Request password reset |
+| POST | `/api/auth/password/reset/` | Request password reset email |
 | POST | `/api/auth/password/reset/confirm/` | Confirm password reset |
 | GET/POST | `/api/auth/roles/` | List / create roles |
 | GET/PUT/DELETE | `/api/auth/roles/<pk>/` | Role detail |
@@ -87,6 +95,25 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 | GET/PUT/DELETE | `/api/auth/profiles/landlord/<pk>/` | Landlord profile detail |
 | GET/POST | `/api/auth/profiles/agent/` | List / create agent profiles |
 | GET/PUT/DELETE | `/api/auth/profiles/agent/<pk>/` | Agent profile detail |
+
+### Property (`/api/property/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET | `/api/property/properties/` | Admin=all, Landlord=own, Agent=assigned |
+| POST | `/api/property/properties/` | Landlord only |
+| GET/PUT | `/api/property/properties/<pk>/` | Admin, owner, assigned agent |
+| DELETE | `/api/property/properties/<pk>/` | Admin, owner only |
+| GET | `/api/property/properties/<pk>/units/` | Any authenticated |
+| POST | `/api/property/properties/<pk>/units/` | Admin, owner, assigned agent |
+| GET/POST | `/api/property/properties/<pk>/agents/` | Admin, owner only |
+| DELETE | `/api/property/properties/<pk>/agents/<id>/` | Admin, owner only |
+| GET/PUT | `/api/property/units/<pk>/` | Admin, owner, assigned agent |
+| DELETE | `/api/property/units/<pk>/` | Admin, owner only |
+| GET/POST | `/api/property/units/<pk>/images/` | GET=any, POST=admin/owner/agent |
+| GET/POST | `/api/property/units/<pk>/lease/` | Admin, owner, assigned agent |
+| GET | `/api/property/units/public/` | No auth required |
+
+### Docs
 | GET | `/api/docs/` | Swagger UI |
 | GET | `/api/redoc/` | ReDoc |
 | GET | `/api/schema/` | OpenAPI schema download |
@@ -102,8 +129,14 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 
 ### Models
 - New domain entities that are role-specific get their own profile table as a `OneToOneField` to `CustomUser`
+- Many-to-many relationships with extra data (e.g. who appointed, when) use an explicit through model — see `PropertyAgent`
 - Always define `__str__` on every model
 - List queries on related models use `select_related` to avoid N+1 queries
+
+### Permissions
+- Permission helpers live at the top of each app's `views.py`: `is_landlord`, `is_admin`, `is_agent_for`
+- Role name checks must match the seeded casing exactly — roles are title-cased: `'Landlord'`, `'Admin'`, `'Agent'`, `'Tenant'`
+- Agents can read and write but never delete — delete is owner/admin only
 
 ### Migrations
 - Always write migrations manually — psycopg2 won't build from source in this venv so `makemigrations` can't run
@@ -118,7 +151,9 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 ### Tests
 - Every new endpoint gets tests covering: list, create, retrieve, update, delete, and 404
 - Each test class has a `setUp` that creates a role, user, and token, and sets client credentials
+- Use the `make_user(username, role_name)` helper pattern (see `property/tests.py`) to reduce setUp boilerplate
 - Tests live in the app's `tests.py`
+- Permission boundary tests are required — test that the wrong role gets 403, not just that the right role succeeds
 
 ---
 
