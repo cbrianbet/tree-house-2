@@ -70,13 +70,13 @@ property/           # property management app
   views.py          # CRUD views + permission helpers (is_landlord, is_admin, is_agent_for)
   urls.py           # all URL patterns under /api/property/
   migrations/       # 0005 adds PropertyAgent
-billing/            # rent collection and invoicing app
-  models.py         # BillingConfig, Invoice, Payment, Receipt, ReminderLog
+billing/            # rent collection, invoicing, expenses, and reporting app
+  models.py         # BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
   serializers.py    # serializers for all models
-  views.py          # billing endpoints + Stripe webhook handler
+  views.py          # billing endpoints + Stripe webhook handler + financial report
   urls.py           # all URL patterns under /api/billing/
   utils.py          # generate_receipt_number() — format: RCP-YYYYMM-XXXX
-  migrations/       # 0001 initial schema
+  migrations/       # 0001 initial schema, 0002 adds ChargeType/AdditionalIncome/Expense
   management/commands/process_billing.py  # daily command: invoices + late fees + reminders
 maintenance/        # maintenance request & bidding app
   models.py         # MaintenanceRequest, MaintenanceBid, MaintenanceNote, MaintenanceImage
@@ -150,6 +150,14 @@ Seeded via data migrations. Roles are:
 | GET | `/api/billing/receipts/` | Scoped by role |
 | GET | `/api/billing/receipts/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/stripe/webhook/` | Stripe (no auth, CSRF exempt) |
+| GET/POST | `/api/billing/properties/<pk>/charge-types/` | Owner/Admin (GET: Agent too) |
+| GET/PUT/DELETE | `/api/billing/properties/<pk>/charge-types/<id>/` | Owner/Admin |
+| GET/POST | `/api/billing/properties/<pk>/additional-income/` | Owner/Admin (GET: Agent too) |
+| GET/PUT/DELETE | `/api/billing/properties/<pk>/additional-income/<id>/` | Owner/Admin |
+| GET/POST | `/api/billing/properties/<pk>/expenses/` | Owner/Admin (GET: Agent too) |
+| GET/PUT/DELETE | `/api/billing/properties/<pk>/expenses/<id>/` | Owner/Admin |
+| GET | `/api/billing/reports/<pk>/?year=2024&month=3` | Owner/Agent/Admin — monthly report |
+| GET | `/api/billing/reports/<pk>/?year=2024` | Owner/Agent/Admin — annual report |
 
 ### Maintenance (`/api/maintenance/`)
 | Method | URL | Who |
@@ -238,6 +246,13 @@ any → rejected           (property owner only)
 - Payment flow: frontend receives `client_secret` from `/pay/` → Stripe confirms → webhook updates Payment + Invoice + generates Receipt
 - Receipt numbers are auto-generated via `billing/utils.py` — never set manually
 - `process_billing` must run daily via cron. Late fees and reminders only fire through this command — they are not triggered by API calls
+
+### Financial Reporting
+- Reports are computed on the fly — no stored report model
+- `ChargeType` is per-property; validate that `unit` and `charge_type` belong to the same property before saving `AdditionalIncome`
+- `Expense` records are auto-created when a maintenance request transitions to `completed` — the accepted bid's `proposed_price` becomes the expense amount with `category='maintenance'`
+- Report income = rent payments received + additional income entries; expenses = Expense records; net = income − expenses
+- Annual report: `?year=2024`; monthly report: `?year=2024&month=3`
 
 ### General
 - Read a file before editing it

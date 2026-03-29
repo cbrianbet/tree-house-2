@@ -156,6 +156,23 @@ def request_detail(request, pk):
                 req.resolved_at = timezone.now()
             req.status = new_status
             req.save()
+
+            # Auto-create expense from accepted bid when work is confirmed complete
+            if new_status == 'completed':
+                from billing.models import Expense
+                accepted_bid = req.bids.filter(status='accepted').first()
+                if accepted_bid:
+                    Expense.objects.create(
+                        property=req.property,
+                        unit=req.unit,
+                        maintenance_request=req,
+                        category='maintenance',
+                        amount=accepted_bid.proposed_price,
+                        description=f"Maintenance completed: {req.title}",
+                        date=timezone.now().date(),
+                        recorded_by=user,
+                    )
+
             return Response(MaintenanceRequestSerializer(req).data)
 
         # Non-status fields (priority, title, etc.) — submitter or admin only

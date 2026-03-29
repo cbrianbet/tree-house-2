@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import BillingConfig, Invoice, Payment, Receipt, ReminderLog
+from .models import BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
 
 
 class BillingConfigSerializer(serializers.ModelSerializer):
@@ -47,3 +47,27 @@ class ReminderLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReminderLog
         fields = ['id', 'invoice', 'reminder_type', 'sent_at']
+
+
+class ChargeTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChargeType
+        fields = ['id', 'property', 'name', 'created_by', 'created_at']
+        read_only_fields = ['property', 'created_by', 'created_at']
+
+
+class AdditionalIncomeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AdditionalIncome
+        fields = ['id', 'unit', 'charge_type', 'amount', 'date', 'description', 'recorded_by', 'created_at']
+        read_only_fields = ['recorded_by', 'created_at']
+
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Expense
+        fields = [
+            'id', 'property', 'unit', 'maintenance_request', 'category',
+            'amount', 'description', 'date', 'recorded_by', 'created_at',
+        ]
+        read_only_fields = ['recorded_by', 'created_at']

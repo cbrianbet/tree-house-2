@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 
 from authentication.models import Role
 from property.models import Property, Unit, Lease, PropertyAgent
-from billing.models import BillingConfig, Invoice, Payment, Receipt, ReminderLog
+from billing.models import BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
 from billing.utils import generate_receipt_number
 
 User = get_user_model()
@@ -373,3 +373,373 @@ class ProcessBillingCommandTests(APITestCase):
         from django.core.management import call_command
         call_command('process_billing', verbosity=0)
         mock_mail.assert_not_called()
+
+
+class ChargeTypeTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.other_landlord, self.other_token = make_user('landlord2', 'Landlord')
+        self.agent, self.agent_token = make_user('agent1', 'Agent')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.prop = make_property(self.landlord)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_landlord_can_create_charge_type(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('charge-type-list', args=[self.prop.id]),
+            {'name': 'Water'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['name'], 'Water')
+
+    def test_duplicate_name_rejected(self):
+        ChargeType.objects.create(property=self.prop, name='Water', created_by=self.landlord)
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('charge-type-list', args=[self.prop.id]),
+            {'name': 'Water'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_landlord_can_list_charge_types(self):
+        ChargeType.objects.create(property=self.prop, name='Water', created_by=self.landlord)
+        ChargeType.objects.create(property=self.prop, name='Electricity', created_by=self.landlord)
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('charge-type-list', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+
+    def test_assigned_agent_can_list_charge_types(self):
+        from property.models import PropertyAgent
+        PropertyAgent.objects.create(property=self.prop, agent=self.agent, appointed_by=self.landlord)
+        self.auth(self.agent_token)
+        response = self.client.get(reverse('charge-type-list', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_agent_cannot_create_charge_type(self):
+        from property.models import PropertyAgent
+        PropertyAgent.objects.create(property=self.prop, agent=self.agent, appointed_by=self.landlord)
+        self.auth(self.agent_token)
+        response = self.client.post(
+            reverse('charge-type-list', args=[self.prop.id]),
+            {'name': 'Parking'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_landlord_cannot_access(self):
+        self.auth(self.other_token)
+        response = self.client.get(reverse('charge-type-list', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_landlord_can_delete_charge_type(self):
+        ct = ChargeType.objects.create(property=self.prop, name='Garbage', created_by=self.landlord)
+        self.auth(self.landlord_token)
+        response = self.client.delete(reverse('charge-type-detail', args=[self.prop.id, ct.id]))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+
+class AdditionalIncomeTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.other_landlord, self.other_token = make_user('landlord2', 'Landlord')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.charge_type = ChargeType.objects.create(property=self.prop, name='Water', created_by=self.landlord)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_landlord_can_record_additional_income(self):
+        self.auth(self.landlord_token)
+        data = {
+            'unit': self.unit.id,
+            'charge_type': self.charge_type.id,
+            'amount': '1500.00',
+            'date': str(date.today()),
+            'description': 'March water',
+        }
+        response = self.client.post(reverse('additional-income-list', args=[self.prop.id]), data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['recorded_by'], self.landlord.id)
+
+    def test_unit_from_wrong_property_rejected(self):
+        other_prop = make_property(self.landlord)
+        other_unit = make_unit(other_prop, self.landlord)
+        self.auth(self.landlord_token)
+        data = {
+            'unit': other_unit.id,
+            'charge_type': self.charge_type.id,
+            'amount': '1500.00',
+            'date': str(date.today()),
+        }
+        response = self.client.post(reverse('additional-income-list', args=[self.prop.id]), data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_charge_type_from_wrong_property_rejected(self):
+        other_prop = make_property(self.landlord)
+        other_ct = ChargeType.objects.create(property=other_prop, name='Water', created_by=self.landlord)
+        self.auth(self.landlord_token)
+        data = {
+            'unit': self.unit.id,
+            'charge_type': other_ct.id,
+            'amount': '1500.00',
+            'date': str(date.today()),
+        }
+        response = self.client.post(reverse('additional-income-list', args=[self.prop.id]), data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_other_landlord_cannot_access(self):
+        self.auth(self.other_token)
+        response = self.client.get(reverse('additional-income-list', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_landlord_can_update_entry(self):
+        entry = AdditionalIncome.objects.create(
+            unit=self.unit, charge_type=self.charge_type,
+            amount=Decimal('1500'), date=date.today(), recorded_by=self.landlord
+        )
+        self.auth(self.landlord_token)
+        response = self.client.put(
+            reverse('additional-income-detail', args=[self.prop.id, entry.id]),
+            {'amount': '1750.00'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Decimal(response.data['amount']), Decimal('1750.00'))
+
+    def test_landlord_can_delete_entry(self):
+        entry = AdditionalIncome.objects.create(
+            unit=self.unit, charge_type=self.charge_type,
+            amount=Decimal('1500'), date=date.today(), recorded_by=self.landlord
+        )
+        self.auth(self.landlord_token)
+        response = self.client.delete(reverse('additional-income-detail', args=[self.prop.id, entry.id]))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+
+class ExpenseTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.other_landlord, self.other_token = make_user('landlord2', 'Landlord')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_landlord_can_record_expense(self):
+        self.auth(self.landlord_token)
+        data = {
+            'category': 'insurance',
+            'amount': '15000.00',
+            'date': str(date.today()),
+            'description': 'Annual insurance',
+        }
+        response = self.client.post(reverse('expense-list', args=[self.prop.id]), data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['category'], 'insurance')
+        self.assertEqual(response.data['recorded_by'], self.landlord.id)
+
+    def test_unit_from_wrong_property_rejected(self):
+        other_prop = make_property(self.landlord)
+        other_unit = make_unit(other_prop, self.landlord)
+        self.auth(self.landlord_token)
+        data = {
+            'unit': other_unit.id,
+            'category': 'utility',
+            'amount': '3000.00',
+            'date': str(date.today()),
+        }
+        response = self.client.post(reverse('expense-list', args=[self.prop.id]), data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_other_landlord_cannot_access(self):
+        self.auth(self.other_token)
+        response = self.client.get(reverse('expense-list', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_landlord_can_list_expenses(self):
+        Expense.objects.create(
+            property=self.prop, category='tax', amount=Decimal('8000'),
+            date=date.today(), recorded_by=self.landlord
+        )
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('expense-list', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_landlord_can_update_expense(self):
+        exp = Expense.objects.create(
+            property=self.prop, category='tax', amount=Decimal('8000'),
+            date=date.today(), recorded_by=self.landlord
+        )
+        self.auth(self.landlord_token)
+        response = self.client.put(
+            reverse('expense-detail', args=[self.prop.id, exp.id]),
+            {'amount': '9000.00'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Decimal(response.data['amount']), Decimal('9000.00'))
+
+    def test_landlord_can_delete_expense(self):
+        exp = Expense.objects.create(
+            property=self.prop, category='other', amount=Decimal('500'),
+            date=date.today(), recorded_by=self.landlord
+        )
+        self.auth(self.landlord_token)
+        response = self.client.delete(reverse('expense-detail', args=[self.prop.id, exp.id]))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+
+class FinancialReportTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.other_landlord, self.other_token = make_user('landlord2', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+
+        today = date.today()
+        # Paid invoice this month
+        self.invoice = Invoice.objects.create(
+            lease=self.lease,
+            period_start=today.replace(day=1),
+            period_end=today,
+            due_date=today,
+            rent_amount=Decimal('45000'),
+            late_fee_amount=Decimal('0'),
+            total_amount=Decimal('45000'),
+            status='paid',
+        )
+        self.payment = Payment.objects.create(
+            invoice=self.invoice,
+            amount=Decimal('45000'),
+            stripe_payment_intent_id='pi_report_test',
+            status='completed',
+            paid_at=timezone.now(),
+        )
+        # Expense this month
+        self.expense = Expense.objects.create(
+            property=self.prop, category='utility', amount=Decimal('5000'),
+            date=today, recorded_by=self.landlord
+        )
+        # Additional income this month
+        self.charge_type = ChargeType.objects.create(property=self.prop, name='Water', created_by=self.landlord)
+        self.ai = AdditionalIncome.objects.create(
+            unit=self.unit, charge_type=self.charge_type,
+            amount=Decimal('1500'), date=today, recorded_by=self.landlord
+        )
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_monthly_report_totals(self):
+        today = date.today()
+        self.auth(self.landlord_token)
+        response = self.client.get(
+            reverse('financial-report', args=[self.prop.id]),
+            {'year': today.year, 'month': today.month}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['income']['total_collected'], '45000.00')
+        self.assertEqual(response.data['income']['additional_income'], '1500.00')
+        self.assertEqual(response.data['income']['total_income'], '46500.00')
+        self.assertEqual(response.data['expenses']['total'], '5000.00')
+        self.assertEqual(response.data['net_income'], '41500.00')
+
+    def test_monthly_report_expense_by_category(self):
+        today = date.today()
+        self.auth(self.landlord_token)
+        response = self.client.get(
+            reverse('financial-report', args=[self.prop.id]),
+            {'year': today.year, 'month': today.month}
+        )
+        self.assertIn('utility', response.data['expenses']['by_category'])
+
+    def test_annual_report(self):
+        today = date.today()
+        self.auth(self.landlord_token)
+        response = self.client.get(
+            reverse('financial-report', args=[self.prop.id]),
+            {'year': today.year}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['period'], str(today.year))
+
+    def test_year_required(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('financial-report', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_tenant_cannot_access_report(self):
+        today = date.today()
+        self.auth(self.tenant_token)
+        response = self.client.get(
+            reverse('financial-report', args=[self.prop.id]),
+            {'year': today.year, 'month': today.month}
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_landlord_cannot_access_report(self):
+        today = date.today()
+        self.auth(self.other_token)
+        response = self.client.get(
+            reverse('financial-report', args=[self.prop.id]),
+            {'year': today.year, 'month': today.month}
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class MaintenanceExpenseAutoCreateTests(APITestCase):
+    """Expense is auto-created from accepted bid when request is marked completed."""
+
+    def setUp(self):
+        from authentication.models import ArtisanProfile
+        from maintenance.models import MaintenanceBid
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.artisan, self.artisan_token = make_user('artisan1', 'Artisan')
+        ArtisanProfile.objects.create(user=self.artisan, trade='plumbing')
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        lease = make_lease(self.unit, self.tenant)
+
+        from maintenance.models import MaintenanceRequest
+        self.req = MaintenanceRequest.objects.create(
+            property=self.prop, unit=self.unit, submitted_by=self.tenant,
+            title='Leaking tap', description='Dripping.', category='plumbing',
+            priority='medium', status='in_progress', assigned_to=self.artisan,
+        )
+        self.bid = MaintenanceBid.objects.create(
+            request=self.req, artisan=self.artisan,
+            proposed_price=Decimal('8500'), status='accepted',
+        )
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_expense_auto_created_on_completion(self):
+        self.auth(self.tenant_token)
+        self.client.put(
+            reverse('maintenance-request-detail', args=[self.req.id]),
+            {'status': 'completed'}
+        )
+        exp = Expense.objects.filter(maintenance_request=self.req).first()
+        self.assertIsNotNone(exp)
+        self.assertEqual(exp.amount, Decimal('8500'))
+        self.assertEqual(exp.category, 'maintenance')
+        self.assertEqual(exp.property, self.prop)
+
+    def test_no_expense_without_accepted_bid(self):
+        self.bid.status = 'pending'
+        self.bid.save()
+        self.auth(self.tenant_token)
+        self.client.put(
+            reverse('maintenance-request-detail', args=[self.req.id]),
+            {'status': 'completed'}
+        )
+        self.assertFalse(Expense.objects.filter(maintenance_request=self.req).exists())
