@@ -58,6 +58,8 @@ INSTALLED_APPS = [
     'allauth.socialaccount',
 
     'drf_spectacular',
+
+    'billing',
 ]
 
 SITE_ID = 1
@@ -146,6 +148,11 @@ REST_AUTH = {
 
 ACCOUNT_ADAPTER = 'authentication.adapter.CustomAccountAdapter'
 AUTH_USER_MODEL = 'authentication.CustomUser'
+
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'sk_test_placeholder')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'whsec_placeholder')
+
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@treehouse.com')
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 EMAIL_CONFIRM_REDIRECT_BASE_URL = os.getenv("EMAIL_CONFIRM_REDIRECT_BASE_URL", "http://localhost:8000/email-confirm/")

@@ -1,7 +1,7 @@
 # Tree House 2 — CLAUDE.md
 
 ## Project Overview
-Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin roles) with role-specific profiles. Agents are appointed by landlords to manage specific properties. Payments and maintenance requests to come.
+Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin roles) with role-specific profiles. Agents are appointed by landlords to manage specific properties. Includes rent collection, Stripe payments, invoice auto-generation, and email reminders. Maintenance requests to come.
 
 ## Tech Stack
 - **Django 4.2** + **Django REST Framework**
@@ -10,6 +10,7 @@ Property management REST API built with Django. Handles user auth (Tenant, Landl
 - **drf-spectacular** — auto-generated Swagger/ReDoc docs
 - **PostgreSQL** via Supabase (connection pooler on port 5432)
 - **dj-database-url** — parses DB connection from env vars
+- **Stripe** — payment processing (`stripe` SDK)
 - **Python 3.14**, virtualenv at `venv/`
 
 ## Environment Setup
@@ -27,7 +28,12 @@ DB_HOST=
 DB_PORT=
 EMAIL_CONFIRM_REDIRECT_BASE_URL=
 PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL=
+DEFAULT_FROM_EMAIL=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
 ```
+
+Stripe keys use `sk_test_placeholder` / `whsec_placeholder` as defaults until real keys are added.
 
 DB connects via Supabase transaction pooler (`aws-1-eu-west-1.pooler.supabase.com:5432`). If connection fails, check that the Supabase project is not paused (free tier pauses after inactivity).
 
@@ -38,6 +44,8 @@ python manage.py runserver 8001     # use alternate port if 8000 is taken
 python manage.py migrate            # apply migrations
 python manage.py test authentication
 python manage.py test property
+python manage.py test billing
+python manage.py process_billing      # generate invoices, apply late fees, send reminders
 ```
 
 Kill port 8000 if already in use:
@@ -61,6 +69,14 @@ property/           # property management app
   views.py          # CRUD views + permission helpers (is_landlord, is_admin, is_agent_for)
   urls.py           # all URL patterns under /api/property/
   migrations/       # 0005 adds PropertyAgent
+billing/            # rent collection and invoicing app
+  models.py         # BillingConfig, Invoice, Payment, Receipt, ReminderLog
+  serializers.py    # serializers for all models
+  views.py          # billing endpoints + Stripe webhook handler
+  urls.py           # all URL patterns under /api/billing/
+  utils.py          # generate_receipt_number() — format: RCP-YYYYMM-XXXX
+  migrations/       # 0001 initial schema
+  management/commands/process_billing.py  # daily command: invoices + late fees + reminders
 templates/          # Django templates directory
 ```
 
@@ -112,6 +128,18 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 | GET/POST | `/api/property/units/<pk>/images/` | GET=any, POST=admin/owner/agent |
 | GET/POST | `/api/property/units/<pk>/lease/` | Admin, owner, assigned agent |
 | GET | `/api/property/units/public/` | No auth required |
+
+### Billing (`/api/billing/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET/POST | `/api/billing/config/<property_id>/` | Owner/Admin |
+| GET | `/api/billing/invoices/` | Admin=all, Landlord=own properties, Agent=assigned, Tenant=own |
+| GET | `/api/billing/invoices/<pk>/` | Owner/Agent/Tenant |
+| POST | `/api/billing/invoices/<pk>/pay/` | Tenant only |
+| GET | `/api/billing/invoices/<pk>/payments/` | Owner/Agent/Tenant |
+| GET | `/api/billing/receipts/` | Scoped by role |
+| GET | `/api/billing/receipts/<pk>/` | Owner/Agent/Tenant |
+| POST | `/api/billing/stripe/webhook/` | Stripe (no auth, CSRF exempt) |
 
 ### Docs
 | GET | `/api/docs/` | Swagger UI |
@@ -170,6 +198,12 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 ### Migrations
 - Never run `makemigrations` — write migration files by hand
 - Schema migration and data migration always go in separate files
+
+### Stripe
+- Webhook endpoint is CSRF exempt and uses `AllowAny` — Stripe signature verification replaces auth
+- Payment flow: frontend receives `client_secret` from `/pay/` → Stripe confirms → webhook updates Payment + Invoice + generates Receipt
+- Receipt numbers are auto-generated via `billing/utils.py` — never set manually
+- `process_billing` must run daily via cron. Late fees and reminders only fire through this command — they are not triggered by API calls
 
 ### General
 - Read a file before editing it
