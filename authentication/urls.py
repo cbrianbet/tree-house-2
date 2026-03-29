@@ -16,6 +16,7 @@ from .views import (
     tenant_profile_list, tenant_profile_detail,
     landlord_profile_list, landlord_profile_detail,
     agent_profile_list, agent_profile_detail,
+    artisan_profile_list, artisan_profile_detail,
 )
 
 _register_view = extend_schema(
@@ -107,4 +108,7 @@ urlpatterns = [
 
     path('profiles/agent/', agent_profile_list, name='agent-profile-list'),
     path('profiles/agent/<int:pk>/', agent_profile_detail, name='agent-profile-detail'),
+
+    path('profiles/artisan/', artisan_profile_list, name='artisan-profile-list'),
+    path('profiles/artisan/<int:pk>/', artisan_profile_detail, name='artisan-profile-detail'),
 ]

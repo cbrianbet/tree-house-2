@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
 
     'billing',
+    'maintenance',
 ]
 
 SITE_ID = 1
