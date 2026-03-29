@@ -1,7 +1,7 @@
 from django.db import models
 from django.utils import timezone
 from authentication.models import CustomUser
-from property.models import Property, Lease
+from property.models import Property, Unit, Lease
 
 
 class BillingConfig(models.Model):
@@ -100,3 +100,60 @@ class ReminderLog(models.Model):
 
     def __str__(self):
         return f"{self.reminder_type} reminder for Invoice {self.invoice_id}"
+
+
+class ChargeType(models.Model):
+    """Landlord-defined income categories per property (water, electricity, service charge, etc.)."""
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='charge_types')
+    name = models.CharField(max_length=100)
+    created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='created_charge_types')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('property', 'name')
+
+    def __str__(self):
+        return f"{self.name} ({self.property.name})"
+
+
+class AdditionalIncome(models.Model):
+    """Income from landlord-defined charges billed to a unit (water, electricity, etc.)."""
+    unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name='additional_income')
+    charge_type = models.ForeignKey(ChargeType, on_delete=models.CASCADE, related_name='income_entries')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    date = models.DateField()
+    description = models.TextField(blank=True)
+    recorded_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='recorded_income')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.charge_type.name} — {self.unit} — {self.amount}"
+
+
+class Expense(models.Model):
+    """Costs incurred by the landlord for a property or unit."""
+    CATEGORY_CHOICES = [
+        ('maintenance', 'Maintenance'),
+        ('utility', 'Utility'),
+        ('insurance', 'Insurance'),
+        ('tax', 'Tax'),
+        ('repair', 'Repair'),
+        ('management_fee', 'Management Fee'),
+        ('other', 'Other'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='expenses')
+    unit = models.ForeignKey(Unit, null=True, blank=True, on_delete=models.SET_NULL, related_name='expenses')
+    maintenance_request = models.ForeignKey(
+        'maintenance.MaintenanceRequest', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='expenses',
+    )
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    description = models.TextField(blank=True)
+    date = models.DateField()
+    recorded_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='recorded_expenses')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.get_category_display()} — {self.property.name} — {self.amount}"
