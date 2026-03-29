@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
-from property.models import PropertyAgent
+from property.models import PropertyAgent, Lease
 from property.views import is_admin, is_landlord, is_agent_for
 from .models import MaintenanceRequest, MaintenanceBid, MaintenanceNote, MaintenanceImage
 from .serializers import (
@@ -93,6 +93,26 @@ def request_list_create(request):
 
         serializer = MaintenanceRequestSerializer(data=request.data)
         if serializer.is_valid():
+            prop = serializer.validated_data['property']
+            unit = serializer.validated_data.get('unit')
+
+            # Unit must belong to the specified property
+            if unit and unit.property_id != prop.id:
+                return Response({'detail': 'The specified unit does not belong to this property.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Landlord must own the property
+            if is_landlord(user) and prop.owner != user:
+                return Response({'detail': 'You can only submit requests for properties you own.'}, status=status.HTTP_403_FORBIDDEN)
+
+            # Tenant must have an active lease on the unit (or any unit in the property for common-area requests)
+            if not is_landlord(user) and not is_admin(user):
+                if unit:
+                    has_access = Lease.objects.filter(unit=unit, tenant=user, is_active=True).exists()
+                else:
+                    has_access = Lease.objects.filter(unit__property=prop, tenant=user, is_active=True).exists()
+                if not has_access:
+                    return Response({'detail': 'You do not have an active lease on this property.'}, status=status.HTTP_403_FORBIDDEN)
+
             serializer.save(submitted_by=user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

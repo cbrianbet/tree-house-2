@@ -61,7 +61,8 @@ class RequestSubmissionTests(APITestCase):
     def auth(self, token):
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
 
-    def test_tenant_can_submit_request(self):
+    def test_tenant_with_lease_can_submit_request(self):
+        make_lease(self.unit, self.tenant)
         self.auth(self.tenant_token)
         data = {
             'property': self.prop.id, 'unit': self.unit.id,
@@ -71,7 +72,61 @@ class RequestSubmissionTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['submitted_by'], self.tenant.id)
 
-    def test_landlord_can_submit_common_area_request(self):
+    def test_tenant_without_lease_cannot_submit_request(self):
+        self.auth(self.tenant_token)
+        data = {
+            'property': self.prop.id, 'unit': self.unit.id,
+            'title': 'Broken tap', 'description': 'Dripping.', 'category': 'plumbing', 'priority': 'low',
+        }
+        response = self.client.post(reverse('maintenance-request-list'), data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_with_lease_can_submit_common_area_request(self):
+        make_lease(self.unit, self.tenant)
+        self.auth(self.tenant_token)
+        data = {
+            'property': self.prop.id,
+            'title': 'Broken gate', 'description': 'Main gate.', 'category': 'electrical', 'priority': 'high',
+        }
+        response = self.client.post(reverse('maintenance-request-list'), data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_tenant_without_lease_cannot_submit_common_area_request(self):
+        self.auth(self.tenant_token)
+        data = {
+            'property': self.prop.id,
+            'title': 'Broken gate', 'description': 'Main gate.', 'category': 'electrical', 'priority': 'high',
+        }
+        response = self.client.post(reverse('maintenance-request-list'), data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_cannot_submit_for_unrelated_property(self):
+        other_landlord, _ = make_user('landlord2', 'Landlord')
+        other_prop = make_property(other_landlord)
+        other_unit = make_unit(other_prop, other_landlord)
+        make_lease(self.unit, self.tenant)  # lease on original property only
+        self.auth(self.tenant_token)
+        data = {
+            'property': other_prop.id, 'unit': other_unit.id,
+            'title': 'X', 'description': 'X', 'category': 'other', 'priority': 'low',
+        }
+        response = self.client.post(reverse('maintenance-request-list'), data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unit_from_different_property_is_rejected(self):
+        other_landlord, _ = make_user('landlord2', 'Landlord')
+        other_prop = make_property(other_landlord)
+        other_unit = make_unit(other_prop, other_landlord)
+        make_lease(self.unit, self.tenant)
+        self.auth(self.tenant_token)
+        data = {
+            'property': self.prop.id, 'unit': other_unit.id,
+            'title': 'X', 'description': 'X', 'category': 'other', 'priority': 'low',
+        }
+        response = self.client.post(reverse('maintenance-request-list'), data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_landlord_can_submit_for_own_property(self):
         self.auth(self.landlord_token)
         data = {
             'property': self.prop.id,
@@ -79,6 +134,17 @@ class RequestSubmissionTests(APITestCase):
         }
         response = self.client.post(reverse('maintenance-request-list'), data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_landlord_cannot_submit_for_other_landlords_property(self):
+        other_landlord, other_token = make_user('landlord2', 'Landlord')
+        other_prop = make_property(other_landlord)
+        self.auth(self.landlord_token)
+        data = {
+            'property': other_prop.id,
+            'title': 'X', 'description': 'X', 'category': 'other', 'priority': 'low',
+        }
+        response = self.client.post(reverse('maintenance-request-list'), data)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_agent_cannot_submit_request(self):
         self.auth(self.agent_token)
