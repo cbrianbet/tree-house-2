@@ -43,3 +43,23 @@ class AgentProfile(models.Model):
 
     def __str__(self):
         return f"AgentProfile({self.user.username})"
+
+
+class ArtisanProfile(models.Model):
+    TRADE_CHOICES = [
+        ('plumbing', 'Plumbing'),
+        ('electrical', 'Electrical'),
+        ('carpentry', 'Carpentry'),
+        ('painting', 'Painting'),
+        ('masonry', 'Masonry'),
+        ('other', 'Other'),
+    ]
+
+    user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='artisan_profile')
+    trade = models.CharField(max_length=50, choices=TRADE_CHOICES)
+    bio = models.TextField(blank=True)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0)
+    verified = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"ArtisanProfile({self.user.username} — {self.trade})"

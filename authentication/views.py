@@ -7,8 +7,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
-from .serializers import RoleSerializer, TenantProfileSerializer, LandlordProfileSerializer, AgentProfileSerializer
-from .models import Role, TenantProfile, LandlordProfile, AgentProfile
+from .serializers import RoleSerializer, TenantProfileSerializer, LandlordProfileSerializer, AgentProfileSerializer, ArtisanProfileSerializer
+from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile
 
 
 def email_confirm_redirect(request, key):
@@ -209,6 +209,33 @@ agent_profile_detail = extend_schema(methods=['GET'], summary="Get agent profile
     )(
         extend_schema(methods=['DELETE'], summary="Delete agent profile")(
             _profile_detail_view(AgentProfile, AgentProfileSerializer)
+        )
+    )
+)
+
+artisan_profile_list = extend_schema(methods=['GET'], summary="List artisan profiles")(
+    extend_schema(
+        methods=['POST'],
+        summary="Create artisan profile",
+        examples=[OpenApiExample("Create", request_only=True, value={
+            "user": 5,
+            "trade": "plumbing",
+            "bio": "10 years experience in residential plumbing",
+        })],
+    )(_profile_list_view(ArtisanProfile, ArtisanProfileSerializer))
+)
+
+artisan_profile_detail = extend_schema(methods=['GET'], summary="Get artisan profile")(
+    extend_schema(
+        methods=['PUT'],
+        summary="Update artisan profile",
+        examples=[OpenApiExample("Update", request_only=True, value={
+            "bio": "Updated bio",
+            "verified": True,
+        })],
+    )(
+        extend_schema(methods=['DELETE'], summary="Delete artisan profile")(
+            _profile_detail_view(ArtisanProfile, ArtisanProfileSerializer)
         )
     )
 )

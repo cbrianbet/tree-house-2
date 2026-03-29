@@ -1,7 +1,7 @@
 # Tree House 2 — CLAUDE.md
 
 ## Project Overview
-Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin roles) with role-specific profiles. Agents are appointed by landlords to manage specific properties. Includes rent collection, Stripe payments, invoice auto-generation, and email reminders. Maintenance requests to come.
+Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin, Artisan roles) with role-specific profiles. Agents are appointed by landlords to manage specific properties. Includes rent collection, Stripe payments, invoice auto-generation, email reminders, and a maintenance request/bidding system where artisans bid on work and tenants/landlords accept bids.
 
 ## Tech Stack
 - **Django 4.2** + **Django REST Framework**
@@ -45,6 +45,7 @@ python manage.py migrate            # apply migrations
 python manage.py test authentication
 python manage.py test property
 python manage.py test billing
+python manage.py test maintenance
 python manage.py process_billing      # generate invoices, apply late fees, send reminders
 ```
 
@@ -57,12 +58,12 @@ lsof -ti:8000 | xargs kill -9
 ```
 treeHouse/          # project config (settings, urls, wsgi)
 authentication/     # user management app
-  models.py         # Role, CustomUser, TenantProfile, LandlordProfile, AgentProfile
+  models.py         # Role, CustomUser, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile
   serializers.py    # serializers for all models
   views.py          # function-based views using @api_view
   urls.py           # all URL patterns under /api/auth/
   adapter.py        # CustomAccountAdapter — saves extra fields on registration
-  migrations/       # 0004 seeds the 4 roles via data migration
+  migrations/       # 0004 seeds roles, 0005 adds ArtisanProfile, 0006 seeds Artisan role
 property/           # property management app
   models.py         # Property, Unit, Lease, PropertyImage, PropertyAgent
   serializers.py    # serializers for all models
@@ -77,6 +78,12 @@ billing/            # rent collection and invoicing app
   utils.py          # generate_receipt_number() — format: RCP-YYYYMM-XXXX
   migrations/       # 0001 initial schema
   management/commands/process_billing.py  # daily command: invoices + late fees + reminders
+maintenance/        # maintenance request & bidding app
+  models.py         # MaintenanceRequest, MaintenanceBid, MaintenanceNote, MaintenanceImage
+  serializers.py    # serializers for all models
+  views.py          # views + permission helpers (is_artisan, can_view_request, can_manage_request)
+  urls.py           # all URL patterns under /api/maintenance/
+  migrations/       # 0001 initial schema
 templates/          # Django templates directory
 ```
 
@@ -86,11 +93,12 @@ templates/          # Django templates directory
 - All protected endpoints require: `Authorization: Token <token>`
 
 ## Roles
-Seeded via migration `0004_seed_roles`. The four roles are:
+Seeded via data migrations. Roles are:
 - **Admin** — platform administrator, no profile table (`is_staff=True`)
 - **Landlord** — has `LandlordProfile` (company_name, tax_id, verified)
-- **Agent** — has `AgentProfile` (agency_name, license_number, commission_rate)
+- **Agent** — has `AgentProfile` (agency_name, license_number, commission_rate); appointed to properties by landlords
 - **Tenant** — has `TenantProfile` (national_id, emergency_contact_name, emergency_contact_phone)
+- **Artisan** — has `ArtisanProfile` (trade, bio, rating, verified); trade choices: plumbing, electrical, carpentry, painting, masonry, other
 
 ## API Endpoints
 
@@ -111,6 +119,8 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 | GET/PUT/DELETE | `/api/auth/profiles/landlord/<pk>/` | Landlord profile detail |
 | GET/POST | `/api/auth/profiles/agent/` | List / create agent profiles |
 | GET/PUT/DELETE | `/api/auth/profiles/agent/<pk>/` | Agent profile detail |
+| GET/POST | `/api/auth/profiles/artisan/` | List / create artisan profiles |
+| GET/PUT/DELETE | `/api/auth/profiles/artisan/<pk>/` | Artisan profile detail |
 
 ### Property (`/api/property/`)
 | Method | URL | Who |
@@ -141,6 +151,29 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 | GET | `/api/billing/receipts/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/stripe/webhook/` | Stripe (no auth, CSRF exempt) |
 
+### Maintenance (`/api/maintenance/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET | `/api/maintenance/requests/` | Admin=all, Landlord=own properties, Agent=assigned, Artisan=open requests matching trade, Tenant=own submitted |
+| POST | `/api/maintenance/requests/` | Tenant or Landlord only (Agents and Artisans cannot submit) |
+| GET | `/api/maintenance/requests/<pk>/` | Submitter, property owner, assigned agent, assigned artisan, admin |
+| PUT | `/api/maintenance/requests/<pk>/` | Status transitions (see below) or field edits (submitter/admin only) |
+| GET | `/api/maintenance/requests/<pk>/bids/` | Artisan=own bid, others=all bids if can_view_request |
+| POST | `/api/maintenance/requests/<pk>/bids/` | Artisan only, request must be `open`, one bid per artisan |
+| PUT | `/api/maintenance/requests/<pk>/bids/<bid_id>/` | Submitter only — `{"status": "accepted"}` or `{"status": "rejected"}` |
+| GET/POST | `/api/maintenance/requests/<pk>/notes/` | Anyone who can view the request |
+| GET/POST | `/api/maintenance/requests/<pk>/images/` | Anyone who can view the request |
+
+**Maintenance request status machine:**
+```
+submitted → open         (property owner only — opens request for bidding)
+open      → assigned     (auto: triggered when submitter accepts a bid)
+assigned  → in_progress  (assigned artisan only)
+in_progress → completed  (request submitter only)
+submitted/open → cancelled  (request submitter only)
+any → rejected           (property owner only)
+```
+
 ### Docs
 | GET | `/api/docs/` | Swagger UI |
 | GET | `/api/redoc/` | ReDoc |
@@ -162,9 +195,10 @@ Seeded via migration `0004_seed_roles`. The four roles are:
 - List queries on related models use `select_related` to avoid N+1 queries
 
 ### Permissions
-- Permission helpers live at the top of each app's `views.py`: `is_landlord`, `is_admin`, `is_agent_for`
-- Role name checks must match the seeded casing exactly — roles are title-cased: `'Landlord'`, `'Admin'`, `'Agent'`, `'Tenant'`
+- Permission helpers live at the top of each app's `views.py`: `is_landlord`, `is_admin`, `is_agent_for`, `is_artisan`
+- Role name checks must match the seeded casing exactly — roles are title-cased: `'Landlord'`, `'Admin'`, `'Agent'`, `'Tenant'`, `'Artisan'`
 - Agents can read and write but never delete — delete is owner/admin only
+- Maintenance: submitter (tenant or landlord) owns accept/reject bids and marks completion; artisan owns in_progress transition
 
 ### Migrations
 - Always write migrations manually — psycopg2 won't build from source in this venv so `makemigrations` can't run

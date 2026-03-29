@@ -1,6 +1,6 @@
 from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
-from .models import Role, TenantProfile, LandlordProfile, AgentProfile
+from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile
 
 from dj_rest_auth.registration.serializers import RegisterSerializer
 
@@ -58,3 +58,10 @@ class AgentProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = AgentProfile
         fields = ['id', 'user', 'agency_name', 'license_number', 'commission_rate']
+
+
+class ArtisanProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ArtisanProfile
+        fields = ['id', 'user', 'trade', 'bio', 'rating', 'verified']
+        read_only_fields = ['rating']
