@@ -11,6 +11,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample
 
 from decimal import Decimal
 
+from django.db import IntegrityError
 from django.db.models import Sum, Count
 
 from property.models import Property, Unit, Lease
@@ -165,10 +166,10 @@ def pay_invoice(request, pk):
     Payment.objects.create(
         invoice=invoice,
         amount=amount_requested,
-        stripe_payment_intent_id=intent['id'],
+        stripe_payment_intent_id=intent.id,
     )
 
-    return Response({'client_secret': intent['client_secret']}, status=status.HTTP_201_CREATED)
+    return Response({'client_secret': intent.client_secret}, status=status.HTTP_201_CREATED)
 
 
 @extend_schema(methods=['GET'], summary="List payments for an invoice")
@@ -321,7 +322,13 @@ def charge_type_list_create(request, property_pk):
             return Response({'detail': 'Only the property owner can create charge types.'}, status=status.HTTP_403_FORBIDDEN)
         serializer = ChargeTypeSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save(property=prop, created_by=user)
+            try:
+                serializer.save(property=prop, created_by=user)
+            except IntegrityError:
+                return Response(
+                    {'detail': 'A charge type with this name already exists for this property.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

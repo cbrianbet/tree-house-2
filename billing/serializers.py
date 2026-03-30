@@ -70,4 +70,4 @@ class ExpenseSerializer(serializers.ModelSerializer):
             'id', 'property', 'unit', 'maintenance_request', 'category',
             'amount', 'description', 'date', 'recorded_by', 'created_at',
         ]
-        read_only_fields = ['recorded_by', 'created_at']
+        read_only_fields = ['property', 'maintenance_request', 'recorded_by', 'created_at']
