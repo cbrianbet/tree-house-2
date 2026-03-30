@@ -3,14 +3,14 @@ from rest_framework.test import APITestCase
 from rest_framework.authtoken.models import Token
 from rest_framework import status
 from django.contrib.auth import get_user_model
-from .models import CustomUser, Role, TenantProfile, LandlordProfile, AgentProfile
+from .models import CustomUser, Role, TenantProfile, LandlordProfile, AgentProfile, NotificationPreference
 
 
 User = get_user_model()
 
 class RoleAPITests(APITestCase):
     def setUp(self):
-        self.role = Role.objects.create(name="Admin", description="Administrator role")
+        self.role, _ = Role.objects.get_or_create(name="Admin", defaults={"description": "Administrator role"})
         self.user = User.objects.create_user(username="testuser", password="testpass", role=self.role)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
@@ -64,7 +64,7 @@ class RoleAPITests(APITestCase):
 
 class RegistrationTestCase(APITestCase):
     def setUp(self):
-        self.role = Role.objects.create(name="Tenant", description="Test role")
+        self.role, _ = Role.objects.get_or_create(name="Tenant", defaults={"description": "Test role"})
 
     def test_register_user_with_phone_and_role(self):
         url = reverse('rest_register')
@@ -89,7 +89,7 @@ class RegistrationTestCase(APITestCase):
 
 class TenantProfileAPITests(APITestCase):
     def setUp(self):
-        self.role = Role.objects.create(name="Tenant", description="Tenant role")
+        self.role, _ = Role.objects.get_or_create(name="Tenant", defaults={"description": "Tenant role"})
         self.user = User.objects.create_user(username="tenant1", password="testpass", role=self.role)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
@@ -137,7 +137,7 @@ class TenantProfileAPITests(APITestCase):
 
 class LandlordProfileAPITests(APITestCase):
     def setUp(self):
-        self.role = Role.objects.create(name="Landlord", description="Landlord role")
+        self.role, _ = Role.objects.get_or_create(name="Landlord", defaults={"description": "Landlord role"})
         self.user = User.objects.create_user(username="landlord1", password="testpass", role=self.role)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
@@ -185,7 +185,7 @@ class LandlordProfileAPITests(APITestCase):
 
 class AgentProfileAPITests(APITestCase):
     def setUp(self):
-        self.role = Role.objects.create(name="Agent", description="Agent role")
+        self.role, _ = Role.objects.get_or_create(name="Agent", defaults={"description": "Agent role"})
         self.user = User.objects.create_user(username="agent1", password="testpass", role=self.role)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
@@ -229,3 +229,137 @@ class AgentProfileAPITests(APITestCase):
     def test_retrieve_nonexistent(self):
         response = self.client.get(reverse('agent-profile-detail', args=[self.profile.id + 9999]))
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+def make_user(username, role_name):
+    role, _ = Role.objects.get_or_create(name=role_name)
+    user = User.objects.create_user(username=username, password='testpass', role=role)
+    token = Token.objects.create(user=user)
+    return user, token
+
+
+class MeAccountTests(APITestCase):
+    def setUp(self):
+        self.user, self.token = make_user('meuser', 'Tenant')
+        self.user.first_name = 'Alice'
+        self.user.last_name = 'Smith'
+        self.user.phone = '0700000000'
+        self.user.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
+
+    def test_get_account(self):
+        response = self.client.get(reverse('me-account'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['username'], 'meuser')
+        self.assertEqual(response.data['first_name'], 'Alice')
+        self.assertEqual(response.data['phone'], '0700000000')
+
+    def test_update_account_name_and_phone(self):
+        response = self.client.put(reverse('me-account'), {
+            'first_name': 'Bob',
+            'last_name': 'Jones',
+            'phone': '0711111111',
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['first_name'], 'Bob')
+        self.assertEqual(response.data['phone'], '0711111111')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, 'Bob')
+
+    def test_update_account_email(self):
+        response = self.client.put(reverse('me-account'), {'email': 'newemail@example.com'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['email'], 'newemail@example.com')
+
+    def test_role_is_read_only(self):
+        other_role, _ = Role.objects.get_or_create(name='Admin')
+        response = self.client.put(reverse('me-account'), {'role': other_role.id})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.role.name, 'Tenant')
+
+    def test_unauthenticated_returns_401(self):
+        self.client.credentials()
+        response = self.client.get(reverse('me-account'))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class MeProfileTests(APITestCase):
+    def setUp(self):
+        self.tenant_user, self.tenant_token = make_user('tenantme', 'Tenant')
+        self.landlord_user, self.landlord_token = make_user('landlordme', 'Landlord')
+        self.admin_user, self.admin_token = make_user('adminme', 'Admin')
+
+    def test_tenant_get_profile_auto_creates(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get(reverse('me-profile'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('national_id', response.data)
+
+    def test_tenant_update_profile(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.put(reverse('me-profile'), {
+            'national_id': 'NAT123',
+            'emergency_contact_name': 'Jane',
+            'emergency_contact_phone': '0722000000',
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['national_id'], 'NAT123')
+
+    def test_landlord_get_profile(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.landlord_token.key}')
+        response = self.client.get(reverse('me-profile'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('company_name', response.data)
+
+    def test_landlord_update_profile(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.landlord_token.key}')
+        response = self.client.put(reverse('me-profile'), {'company_name': 'My Properties Ltd'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['company_name'], 'My Properties Ltd')
+
+    def test_admin_has_no_role_profile(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
+        response = self.client.get(reverse('me-profile'))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class MeNotificationsTests(APITestCase):
+    def setUp(self):
+        self.user, self.token = make_user('notifuser', 'Tenant')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
+
+    def test_get_creates_defaults(self):
+        response = self.client.get(reverse('me-notifications'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['email_notifications'])
+        self.assertTrue(response.data['payment_due_reminder'])
+        self.assertTrue(response.data['lease_expiry_notice'])
+
+    def test_update_preferences(self):
+        response = self.client.put(reverse('me-notifications'), {
+            'payment_received': False,
+            'new_maintenance_request': False,
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['payment_received'])
+        self.assertFalse(response.data['new_maintenance_request'])
+        # unchanged fields stay True
+        self.assertTrue(response.data['email_notifications'])
+
+    def test_disable_all_emails(self):
+        response = self.client.put(reverse('me-notifications'), {'email_notifications': False})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['email_notifications'])
+        prefs = NotificationPreference.objects.get(user=self.user)
+        self.assertFalse(prefs.email_notifications)
+
+    def test_idempotent_get(self):
+        self.client.get(reverse('me-notifications'))
+        self.client.get(reverse('me-notifications'))
+        self.assertEqual(NotificationPreference.objects.filter(user=self.user).count(), 1)
+
+    def test_unauthenticated_returns_401(self):
+        self.client.credentials()
+        response = self.client.get(reverse('me-notifications'))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

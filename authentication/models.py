@@ -45,6 +45,25 @@ class AgentProfile(models.Model):
         return f"AgentProfile({self.user.username})"
 
 
+class NotificationPreference(models.Model):
+    user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='notification_preferences')
+    email_notifications = models.BooleanField(default=True)
+    # Billing events
+    payment_due_reminder = models.BooleanField(default=True)
+    payment_received = models.BooleanField(default=True)
+    # Maintenance events
+    maintenance_updates = models.BooleanField(default=True)
+    new_maintenance_request = models.BooleanField(default=True)
+    # Application / lease events
+    new_application = models.BooleanField(default=True)
+    application_status_change = models.BooleanField(default=True)
+    lease_expiry_notice = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"NotificationPreference({self.user.username})"
+
+
 class ArtisanProfile(models.Model):
     TRADE_CHOICES = [
         ('plumbing', 'Plumbing'),

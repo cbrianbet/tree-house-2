@@ -59,6 +59,8 @@ INSTALLED_APPS = [
 
     'drf_spectacular',
 
+    'corsheaders',
+
     'billing',
     'maintenance',
 ]
@@ -66,6 +68,7 @@ INSTALLED_APPS = [
 SITE_ID = 1
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -146,6 +149,12 @@ REST_AUTH = {
     'USER_DETAILS_SERIALIZER': 'authentication.serializers.CustomUserDetailsSerializer',
     # 'PASSWORD_RESET_SERIALIZER': 'authentication.serializers.CustomPasswordResetSerializer'
 }
+
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+CORS_ALLOW_CREDENTIALS = True
 
 ACCOUNT_ADAPTER = 'authentication.adapter.CustomAccountAdapter'
 AUTH_USER_MODEL = 'authentication.CustomUser'
