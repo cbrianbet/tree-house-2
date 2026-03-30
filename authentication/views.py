@@ -7,8 +7,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
-from .serializers import RoleSerializer, TenantProfileSerializer, LandlordProfileSerializer, AgentProfileSerializer, ArtisanProfileSerializer
-from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile
+from .serializers import (
+    RoleSerializer, TenantProfileSerializer, LandlordProfileSerializer,
+    AgentProfileSerializer, ArtisanProfileSerializer,
+    AccountUpdateSerializer, NotificationPreferenceSerializer,
+)
+from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, NotificationPreference, CustomUser
 
 
 def email_confirm_redirect(request, key):
@@ -239,3 +243,138 @@ artisan_profile_detail = extend_schema(methods=['GET'], summary="Get artisan pro
         )
     )
 )
+
+
+# ---------------------------------------------------------------------------
+# "Me" endpoints — always operate on the authenticated user's own data
+# ---------------------------------------------------------------------------
+
+_ROLE_PROFILE_MAP = {
+    Role.TENANT: (TenantProfile, TenantProfileSerializer),
+    Role.LANDLORD: (LandlordProfile, LandlordProfileSerializer),
+    Role.AGENT: (AgentProfile, AgentProfileSerializer),
+    Role.ARTISAN: (ArtisanProfile, ArtisanProfileSerializer),
+}
+
+
+@extend_schema(
+    methods=['GET'],
+    summary="Get current user's account details",
+)
+@extend_schema(
+    methods=['PATCH'],
+    summary="Partially update current user's account details",
+    examples=[
+        OpenApiExample(
+            "Update account",
+            request_only=True,
+            value={
+                "first_name": "John",
+                "last_name": "Doe",
+                "email": "john@example.com",
+                "phone": "0712345678",
+            },
+        )
+    ],
+)
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def me_account(request):
+    if request.method == 'GET':
+        serializer = AccountUpdateSerializer(request.user)
+        return Response(serializer.data)
+    serializer = AccountUpdateSerializer(request.user, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    methods=['GET'],
+    summary="Get current user's role-specific profile",
+)
+@extend_schema(
+    methods=['PATCH'],
+    summary="Partially update current user's role-specific profile",
+    examples=[
+        OpenApiExample(
+            "Update tenant profile",
+            request_only=True,
+            value={"national_id": "12345678", "emergency_contact_name": "Jane Doe", "emergency_contact_phone": "0722000000"},
+        ),
+        OpenApiExample(
+            "Update landlord profile",
+            request_only=True,
+            value={"company_name": "Bett Properties Ltd", "tax_id": "A123456789B"},
+        ),
+        OpenApiExample(
+            "Update agent profile",
+            request_only=True,
+            value={"agency_name": "Top Agents Ltd", "commission_rate": "5.00"},
+        ),
+        OpenApiExample(
+            "Update artisan profile",
+            request_only=True,
+            value={"trade": "plumbing", "bio": "10 years experience"},
+        ),
+    ],
+)
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def me_profile(request):
+    role_name = request.user.role.name if request.user.role else None
+    mapping = _ROLE_PROFILE_MAP.get(role_name)
+    if not mapping:
+        return Response({'detail': 'No role-specific profile for this user.'}, status=status.HTTP_404_NOT_FOUND)
+
+    model, serializer_class = mapping
+    profile, _ = model.objects.get_or_create(user=request.user)
+
+    if request.method == 'GET':
+        return Response(serializer_class(profile).data)
+
+    serializer = serializer_class(profile, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    methods=['GET'],
+    summary="Get current user's notification preferences",
+)
+@extend_schema(
+    methods=['PATCH'],
+    summary="Partially update current user's notification preferences",
+    examples=[
+        OpenApiExample(
+            "Update notifications",
+            request_only=True,
+            value={
+                "email_notifications": True,
+                "payment_due_reminder": True,
+                "payment_received": False,
+                "maintenance_updates": True,
+                "new_maintenance_request": True,
+                "new_application": True,
+                "application_status_change": True,
+                "lease_expiry_notice": True,
+            },
+        )
+    ],
+)
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def me_notifications(request):
+    prefs, _ = NotificationPreference.objects.get_or_create(user=request.user)
+
+    if request.method == 'GET':
+        return Response(NotificationPreferenceSerializer(prefs).data)
+
+    serializer = NotificationPreferenceSerializer(prefs, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

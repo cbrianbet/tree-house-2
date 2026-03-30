@@ -3,6 +3,7 @@ from dj_rest_auth.registration.views import (
     VerifyEmailView,
 )
 from dj_rest_auth.views import (
+    PasswordChangeView,
     PasswordResetConfirmView,
     PasswordResetView,
 )
@@ -17,6 +18,7 @@ from .views import (
     landlord_profile_list, landlord_profile_detail,
     agent_profile_list, agent_profile_detail,
     artisan_profile_list, artisan_profile_detail,
+    me_account, me_profile, me_notifications,
 )
 
 _register_view = extend_schema(
@@ -111,4 +113,10 @@ urlpatterns = [
 
     path('profiles/artisan/', artisan_profile_list, name='artisan-profile-list'),
     path('profiles/artisan/<int:pk>/', artisan_profile_detail, name='artisan-profile-detail'),
+
+    # Current user self-service
+    path('me/', me_account, name='me-account'),
+    path('me/profile/', me_profile, name='me-profile'),
+    path('me/notifications/', me_notifications, name='me-notifications'),
+    path('password/change/', PasswordChangeView.as_view(), name='rest_password_change'),
 ]

@@ -1,6 +1,6 @@
 from dj_rest_auth.serializers import UserDetailsSerializer
 from rest_framework import serializers
-from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile
+from .models import CustomUser, Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, NotificationPreference
 
 from dj_rest_auth.registration.serializers import RegisterSerializer
 
@@ -65,3 +65,27 @@ class ArtisanProfileSerializer(serializers.ModelSerializer):
         model = ArtisanProfile
         fields = ['id', 'user', 'trade', 'bio', 'rating', 'verified']
         read_only_fields = ['rating']
+
+
+class AccountUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone', 'role']
+        read_only_fields = ['id', 'role']
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            'email_notifications',
+            'payment_due_reminder',
+            'payment_received',
+            'maintenance_updates',
+            'new_maintenance_request',
+            'new_application',
+            'application_status_change',
+            'lease_expiry_notice',
+            'updated_at',
+        ]
+        read_only_fields = ['updated_at']
