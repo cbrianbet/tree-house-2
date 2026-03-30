@@ -9,10 +9,10 @@ from drf_spectacular.utils import extend_schema, OpenApiExample
 
 from .serializers import (
     RoleSerializer, TenantProfileSerializer, LandlordProfileSerializer,
-    AgentProfileSerializer, ArtisanProfileSerializer,
+    AgentProfileSerializer, ArtisanProfileSerializer, MovingCompanyProfileSerializer,
     AccountUpdateSerializer, NotificationPreferenceSerializer,
 )
-from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, NotificationPreference, CustomUser
+from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, NotificationPreference, CustomUser, MovingCompanyProfile
 
 
 def email_confirm_redirect(request, key):
@@ -232,6 +232,40 @@ agent_profile_detail = extend_schema(methods=['GET'], summary="Get agent profile
     )
 )
 
+moving_company_profile_list = extend_schema(methods=['GET'], summary="List moving company profiles")(
+    extend_schema(
+        methods=['POST'],
+        summary="Create moving company profile",
+        examples=[OpenApiExample("Create", request_only=True, value={
+            "user": 6,
+            "company_name": "Swift Movers Ltd",
+            "description": "Professional moving services across the city",
+            "phone": "0712345678",
+            "address": "123 Mover Street",
+            "city": "Nairobi",
+            "service_areas": ["Nairobi", "Mombasa", "Kisumu"],
+            "base_price": "5000.00",
+            "price_per_km": "50.00",
+        })],
+    )(_profile_list_view(MovingCompanyProfile, MovingCompanyProfileSerializer))
+)
+
+moving_company_profile_detail = extend_schema(methods=['GET'], summary="Get moving company profile")(
+    extend_schema(
+        methods=['PUT'],
+        summary="Update moving company profile",
+        examples=[OpenApiExample("Update", request_only=True, value={
+            "company_name": "Swift Movers Pro",
+            "service_areas": ["Nairobi", "Mombasa"],
+            "base_price": "6000.00",
+        })],
+    )(
+        extend_schema(methods=['DELETE'], summary="Delete moving company profile")(
+            _profile_detail_view(MovingCompanyProfile, MovingCompanyProfileSerializer)
+        )
+    )
+)
+
 artisan_profile_list = extend_schema(methods=['GET'], summary="List artisan profiles")(
     extend_schema(
         methods=['POST'],
@@ -269,6 +303,7 @@ _ROLE_PROFILE_MAP = {
     Role.LANDLORD: (LandlordProfile, LandlordProfileSerializer),
     Role.AGENT: (AgentProfile, AgentProfileSerializer),
     Role.ARTISAN: (ArtisanProfile, ArtisanProfileSerializer),
+    Role.MOVING_COMPANY: (MovingCompanyProfile, MovingCompanyProfileSerializer),
 }
 
 

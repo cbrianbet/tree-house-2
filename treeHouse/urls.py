@@ -31,4 +31,6 @@ urlpatterns = [
     path('api/notifications/', include('notifications.urls')),
     path('api/messaging/', include('messaging.urls')),
     path('api/disputes/', include('disputes.urls')),
+    path('api/moving/', include('moving.urls')),
+    path('api/neighborhood/', include('neighborhood.urls')),
 ]
