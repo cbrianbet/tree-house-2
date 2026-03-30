@@ -1,10 +1,17 @@
+from datetime import date, timedelta
+from decimal import Decimal
+
+from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent
-from .serializers import PropertySerializer, UnitSerializer, PropertyImageSerializer, LeaseSerializer, PropertyAgentSerializer
+from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication
+from .serializers import (
+    PropertySerializer, UnitSerializer, PropertyImageSerializer,
+    LeaseSerializer, PropertyAgentSerializer, TenantApplicationSerializer,
+)
 
 
 def is_landlord(user):
@@ -324,3 +331,288 @@ def property_agent_detail(request, property_id, agent_id):
 
     pa.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Tenant Applications ──────────────────────────────────────────────────────
+
+@extend_schema(methods=['GET'], summary="List tenant applications")
+@extend_schema(
+    methods=['POST'],
+    summary="Submit a tenant application for a unit",
+    examples=[
+        OpenApiExample("Apply for unit", request_only=True, value={
+            "unit": 2,
+            "message": "I am a working professional looking for a quiet 2-bed unit.",
+        }),
+    ],
+)
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def application_list_create(request):
+    user = request.user
+
+    if request.method == 'GET':
+        if is_admin(user):
+            qs = TenantApplication.objects.select_related('unit__property', 'applicant').all()
+        elif is_landlord(user):
+            qs = TenantApplication.objects.filter(unit__property__owner=user).select_related('unit__property', 'applicant')
+        else:
+            qs = TenantApplication.objects.filter(applicant=user).select_related('unit__property')
+        return Response(TenantApplicationSerializer(qs, many=True).data)
+
+    elif request.method == 'POST':
+        if not (hasattr(user, 'role') and user.role.name == 'Tenant'):
+            return Response({'detail': 'Only tenants can submit applications.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = TenantApplicationSerializer(data=request.data)
+        if serializer.is_valid():
+            unit = serializer.validated_data['unit']
+            if unit.is_occupied:
+                return Response({'detail': 'This unit is already occupied.'}, status=status.HTTP_400_BAD_REQUEST)
+            serializer.save(applicant=user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(methods=['GET'], summary="Get application detail")
+@extend_schema(
+    methods=['PUT'],
+    summary="Update application status",
+    examples=[
+        OpenApiExample("Approve (landlord)", request_only=True, value={
+            "status": "approved",
+            "start_date": "2024-04-01",
+            "end_date": "2025-03-31",
+            "rent_amount": "25000.00",
+        }),
+        OpenApiExample("Reject (landlord)", request_only=True, value={"status": "rejected"}),
+        OpenApiExample("Withdraw (tenant)", request_only=True, value={"status": "withdrawn"}),
+    ],
+)
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated])
+def application_detail(request, pk):
+    try:
+        app = TenantApplication.objects.select_related('unit__property', 'applicant').get(pk=pk)
+    except TenantApplication.DoesNotExist:
+        return Response({'detail': 'Application not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    user = request.user
+    is_owner = app.unit.property.owner == user
+    is_applicant = app.applicant == user
+
+    if not (is_admin(user) or is_owner or is_applicant):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        return Response(TenantApplicationSerializer(app).data)
+
+    new_status = request.data.get('status')
+
+    if new_status == 'withdrawn':
+        if not is_applicant:
+            return Response({'detail': 'Only the applicant can withdraw.'}, status=status.HTTP_403_FORBIDDEN)
+        if app.status != 'pending':
+            return Response({'detail': 'Only pending applications can be withdrawn.'}, status=status.HTTP_400_BAD_REQUEST)
+        app.status = 'withdrawn'
+        app.save()
+        return Response(TenantApplicationSerializer(app).data)
+
+    if new_status in ('approved', 'rejected'):
+        if not (is_admin(user) or is_owner):
+            return Response({'detail': 'Only the property owner can approve or reject applications.'}, status=status.HTTP_403_FORBIDDEN)
+        if app.status != 'pending':
+            return Response({'detail': 'Only pending applications can be reviewed.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_status == 'approved':
+            if app.unit.is_occupied:
+                return Response({'detail': 'Unit is already occupied.'}, status=status.HTTP_400_BAD_REQUEST)
+            start_date = request.data.get('start_date')
+            rent_amount = request.data.get('rent_amount')
+            end_date = request.data.get('end_date')
+            if not start_date or not rent_amount:
+                return Response({'detail': 'start_date and rent_amount are required to approve.'}, status=status.HTTP_400_BAD_REQUEST)
+            Lease.objects.create(
+                unit=app.unit,
+                tenant=app.applicant,
+                start_date=start_date,
+                end_date=end_date,
+                rent_amount=rent_amount,
+            )
+            app.unit.is_occupied = True
+            app.unit.save()
+            # Reject all other pending applications for the same unit
+            TenantApplication.objects.filter(unit=app.unit, status='pending').exclude(pk=pk).update(status='rejected')
+
+        app.status = new_status
+        app.reviewed_by = user
+        app.reviewed_at = timezone.now()
+        app.save()
+        return Response(TenantApplicationSerializer(app).data)
+
+    return Response({'detail': 'Invalid status.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ── Landlord Dashboard ───────────────────────────────────────────────────────
+
+@extend_schema(
+    methods=['GET'],
+    summary="Landlord dashboard — portfolio overview",
+    examples=[
+        OpenApiExample("Dashboard response", value={
+            "properties": {"total": 3, "total_units": 24, "occupied_units": 19, "vacant_units": 5, "occupancy_rate": "79.2%"},
+            "adverts": {"count": 5, "units": [{"id": 2, "name": "A1", "property": "Sunset Apartments", "price": "25000.00"}]},
+            "applications": {"pending": 4, "approved_this_month": 2},
+            "leases_ending_soon": [{"id": 1, "unit": "A1", "property": "Sunset Apartments", "tenant": "jane", "end_date": "2024-04-30", "days_remaining": 32}],
+            "billing": {"overdue_invoices": 3, "collected_this_month": "135000.00", "outstanding": "45000.00"},
+            "maintenance": {"submitted": 2, "open": 1, "in_progress": 3},
+            "performance": {"period": "2024-03", "by_property": [{"id": 1, "name": "Sunset Apartments", "net_income": "117500.00", "occupancy_rate": "83.3%"}]},
+        }),
+    ],
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def landlord_dashboard(request):
+    user = request.user
+    if not (is_admin(user) or is_landlord(user)):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    from billing.models import Payment, Invoice, Expense, AdditionalIncome
+    from maintenance.models import MaintenanceRequest
+    from django.db.models import Sum, Count
+
+    today = date.today()
+    year, month = today.year, today.month
+    lease_warning_date = today + timedelta(days=60)
+
+    # ── Properties & units ───────────────────────────────────────────────────
+    if is_admin(user):
+        properties = Property.objects.prefetch_related('units').all()
+    else:
+        properties = Property.objects.filter(owner=user).prefetch_related('units')
+
+    prop_ids = [p.id for p in properties]
+    total_units = sum(p.units.count() for p in properties)
+    occupied_units = sum(p.units.filter(is_occupied=True).count() for p in properties)
+    vacant_units = total_units - occupied_units
+    occupancy_rate = f"{(occupied_units / total_units * 100):.1f}%" if total_units else "0%"
+
+    # ── Current adverts (public + vacant) ───────────────────────────────────
+    advert_qs = Unit.objects.filter(
+        property__in=properties, is_public=True, is_occupied=False
+    ).select_related('property')
+    adverts = [
+        {'id': u.id, 'name': u.name, 'property': u.property.name, 'price': str(u.price or 0)}
+        for u in advert_qs
+    ]
+
+    # ── Applications ─────────────────────────────────────────────────────────
+    app_base = TenantApplication.objects.filter(unit__property__in=properties)
+    pending_apps = app_base.filter(status='pending').count()
+    approved_this_month = app_base.filter(
+        status='approved', reviewed_at__year=year, reviewed_at__month=month
+    ).count()
+
+    # ── Leases ending within 60 days ─────────────────────────────────────────
+    ending_leases = Lease.objects.filter(
+        unit__property__in=properties,
+        is_active=True,
+        end_date__isnull=False,
+        end_date__lte=lease_warning_date,
+        end_date__gte=today,
+    ).select_related('unit__property', 'tenant')
+    leases_ending = [
+        {
+            'id': l.id,
+            'unit': l.unit.name,
+            'property': l.unit.property.name,
+            'tenant': l.tenant.username,
+            'end_date': str(l.end_date),
+            'days_remaining': (l.end_date - today).days,
+        }
+        for l in ending_leases
+    ]
+
+    # ── Billing (current month) ───────────────────────────────────────────────
+    collected = Payment.objects.filter(
+        status='completed',
+        invoice__lease__unit__property__in=properties,
+        paid_at__year=year, paid_at__month=month,
+    ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+
+    overdue_count = Invoice.objects.filter(
+        lease__unit__property__in=properties, status='overdue'
+    ).count()
+
+    outstanding = Invoice.objects.filter(
+        lease__unit__property__in=properties,
+        status__in=['pending', 'partial', 'overdue'],
+    ).aggregate(t=Sum('total_amount'))['t'] or Decimal('0')
+
+    # ── Maintenance ───────────────────────────────────────────────────────────
+    maint_base = MaintenanceRequest.objects.filter(property__in=properties)
+    maintenance = {
+        s: maint_base.filter(status=s).count()
+        for s in ('submitted', 'open', 'in_progress', 'assigned')
+    }
+
+    # ── Per-property performance (current month) ──────────────────────────────
+    perf = []
+    for prop in properties:
+        p_collected = Payment.objects.filter(
+            status='completed',
+            invoice__lease__unit__property=prop,
+            paid_at__year=year, paid_at__month=month,
+        ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+
+        p_ai = AdditionalIncome.objects.filter(
+            unit__property=prop, date__year=year, date__month=month,
+        ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+
+        p_exp = Expense.objects.filter(
+            property=prop, date__year=year, date__month=month,
+        ).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+
+        p_units = prop.units.count()
+        p_occupied = prop.units.filter(is_occupied=True).count()
+        net = p_collected + p_ai - p_exp
+
+        perf.append({
+            'id': prop.id,
+            'name': prop.name,
+            'net_income': str(net),
+            'total_units': p_units,
+            'occupied_units': p_occupied,
+            'occupancy_rate': f"{(p_occupied / p_units * 100):.1f}%" if p_units else "0%",
+        })
+
+    perf.sort(key=lambda x: Decimal(x['net_income']), reverse=True)
+
+    return Response({
+        'properties': {
+            'total': len(properties),
+            'total_units': total_units,
+            'occupied_units': occupied_units,
+            'vacant_units': vacant_units,
+            'occupancy_rate': occupancy_rate,
+        },
+        'adverts': {
+            'count': len(adverts),
+            'units': adverts,
+        },
+        'applications': {
+            'pending': pending_apps,
+            'approved_this_month': approved_this_month,
+        },
+        'leases_ending_soon': leases_ending,
+        'billing': {
+            'overdue_invoices': overdue_count,
+            'collected_this_month': str(collected),
+            'outstanding': str(outstanding),
+        },
+        'maintenance': maintenance,
+        'performance': {
+            'period': f"{year}-{month:02d}",
+            'by_property': perf,
+        },
+    })

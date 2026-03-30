@@ -94,3 +94,28 @@ class PropertyAgent(models.Model):
 
 	def __str__(self):
 		return f"{self.agent.username} manages {self.property.name}"
+
+
+class TenantApplication(models.Model):
+	STATUS_CHOICES = [
+		('pending', 'Pending'),
+		('approved', 'Approved'),
+		('rejected', 'Rejected'),
+		('withdrawn', 'Withdrawn'),
+	]
+
+	unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name='applications')
+	applicant = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='applications')
+	status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+	message = models.TextField(blank=True)
+	reviewed_by = models.ForeignKey(
+		CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_applications'
+	)
+	reviewed_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		unique_together = ('unit', 'applicant')
+
+	def __str__(self):
+		return f"Application by {self.applicant.username} for {self.unit}"

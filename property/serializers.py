@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent
+from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication
 
 
 class PropertySerializer(serializers.ModelSerializer):
@@ -39,3 +39,10 @@ class PropertyAgentSerializer(serializers.ModelSerializer):
         model = PropertyAgent
         fields = ['id', 'property', 'agent', 'appointed_by', 'appointed_at']
         read_only_fields = ['property', 'appointed_by', 'appointed_at']
+
+
+class TenantApplicationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantApplication
+        fields = ['id', 'unit', 'applicant', 'status', 'message', 'reviewed_by', 'reviewed_at', 'created_at']
+        read_only_fields = ['applicant', 'status', 'reviewed_by', 'reviewed_at', 'created_at']

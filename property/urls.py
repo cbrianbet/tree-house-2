@@ -11,4 +11,9 @@ urlpatterns = [
     path('units/<int:unit_id>/images/', views.unit_image_list_create, name='unit-image-list-create'),
     path('units/<int:unit_id>/lease/', views.lease_list_create, name='lease-list-create'),
     path('units/public/', views.public_units, name='public-units'),
+    # Tenant applications
+    path('applications/', views.application_list_create, name='application-list'),
+    path('applications/<int:pk>/', views.application_detail, name='application-detail'),
+    # Landlord dashboard
+    path('dashboard/', views.landlord_dashboard, name='landlord-dashboard'),
 ]

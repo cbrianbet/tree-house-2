@@ -65,11 +65,11 @@ authentication/     # user management app
   adapter.py        # CustomAccountAdapter — saves extra fields on registration
   migrations/       # 0004 seeds roles, 0005 adds ArtisanProfile, 0006 seeds Artisan role
 property/           # property management app
-  models.py         # Property, Unit, Lease, PropertyImage, PropertyAgent
+  models.py         # Property, Unit, Lease, PropertyImage, PropertyAgent, TenantApplication
   serializers.py    # serializers for all models
-  views.py          # CRUD views + permission helpers (is_landlord, is_admin, is_agent_for)
+  views.py          # CRUD views + permission helpers (is_landlord, is_admin, is_agent_for) + dashboard
   urls.py           # all URL patterns under /api/property/
-  migrations/       # 0005 adds PropertyAgent
+  migrations/       # 0005 adds PropertyAgent, 0006 adds TenantApplication
 billing/            # rent collection, invoicing, expenses, and reporting app
   models.py         # BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
   serializers.py    # serializers for all models
@@ -138,6 +138,9 @@ Seeded via data migrations. Roles are:
 | GET/POST | `/api/property/units/<pk>/images/` | GET=any, POST=admin/owner/agent |
 | GET/POST | `/api/property/units/<pk>/lease/` | Admin, owner, assigned agent |
 | GET | `/api/property/units/public/` | No auth required |
+| GET/POST | `/api/property/applications/` | Landlord=own units, Tenant=own, Admin=all |
+| GET/PUT | `/api/property/applications/<pk>/` | Landlord: approve/reject — Tenant: withdraw |
+| GET | `/api/property/dashboard/` | Landlord / Admin |
 
 ### Billing (`/api/billing/`)
 | Method | URL | Who |
@@ -253,6 +256,17 @@ any → rejected           (property owner only)
 - `Expense` records are auto-created when a maintenance request transitions to `completed` — the accepted bid's `proposed_price` becomes the expense amount with `category='maintenance'`
 - Report income = rent payments received + additional income entries; expenses = Expense records; net = income − expenses
 - Annual report: `?year=2024`; monthly report: `?year=2024&month=3`
+
+### Tenant Applications
+- Only Tenants can submit applications; only the property owner or admin can approve/reject; only the applicant can withdraw
+- Approving an application requires `start_date` and `rent_amount` in the payload — a `Lease` is auto-created and competing pending applications on the same unit are auto-rejected
+- `unique_together = ('unit', 'applicant')` — one application per tenant per unit
+
+### Dashboard
+- `GET /api/property/dashboard/` is scoped automatically: landlord sees own portfolio, admin sees all
+- Billing and maintenance data are imported lazily inside the view to avoid cross-app import issues
+- "Almost ending leases" threshold is 60 days; "adverts" are units with `is_public=True` and `is_occupied=False`
+- Performance ranking is by net income (`payments + additional_income − expenses`) for the current calendar month
 
 ### General
 - Read a file before editing it
