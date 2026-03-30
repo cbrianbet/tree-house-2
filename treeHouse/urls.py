@@ -28,4 +28,7 @@ urlpatterns = [
     path('api/property/', include('property.urls')),
     path('api/billing/', include('billing.urls')),
     path('api/maintenance/', include('maintenance.urls')),
+    path('api/notifications/', include('notifications.urls')),
+    path('api/messaging/', include('messaging.urls')),
+    path('api/disputes/', include('disputes.urls')),
 ]

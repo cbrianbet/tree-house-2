@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from django.db import IntegrityError
 
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -7,10 +8,11 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication
+from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview
 from .serializers import (
     PropertySerializer, UnitSerializer, PropertyImageSerializer,
     LeaseSerializer, PropertyAgentSerializer, TenantApplicationSerializer,
+    LeaseDocumentSerializer, PropertyReviewSerializer, TenantReviewSerializer,
 )
 
 
@@ -29,6 +31,11 @@ def is_agent_for(user, property):
         and user.role.name == 'Agent'
         and PropertyAgent.objects.filter(agent=user, property=property).exists()
     )
+
+
+def is_tenant(user):
+    from authentication.models import Role
+    return user.is_authenticated and hasattr(user, 'role') and user.role.name == Role.TENANT
 
 
 @extend_schema(methods=['GET'], summary="List properties")
@@ -369,7 +376,10 @@ def application_list_create(request):
             unit = serializer.validated_data['unit']
             if unit.is_occupied:
                 return Response({'detail': 'This unit is already occupied.'}, status=status.HTTP_400_BAD_REQUEST)
-            serializer.save(applicant=user)
+            try:
+                serializer.save(applicant=user)
+            except IntegrityError:
+                return Response({'detail': 'You have already applied for this unit.'}, status=status.HTTP_400_BAD_REQUEST)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -616,3 +626,271 @@ def landlord_dashboard(request):
             'by_property': perf,
         },
     })
+
+
+# ── Lease Documents ───────────────────────────────────────────────────────────
+
+@extend_schema(methods=['GET'], summary="List documents for a lease")
+@extend_schema(
+    methods=['POST'],
+    summary="Upload a document for a lease",
+    examples=[
+        OpenApiExample("Upload lease document", request_only=True, value={
+            "document_type": "lease_agreement",
+            "title": "Signed Lease Agreement 2026",
+            "file_url": "https://storage.example.com/leases/doc-001.pdf",
+        })
+    ],
+)
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def lease_document_list_create(request, lease_id):
+    try:
+        lease = Lease.objects.select_related('unit__property', 'tenant').get(pk=lease_id)
+    except Lease.DoesNotExist:
+        return Response({'detail': 'Lease not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    prop = lease.unit.property
+    is_owner = prop.owner == request.user
+    is_assigned_agent = is_agent_for(request.user, prop)
+    is_lease_tenant = lease.tenant == request.user
+
+    if not (is_admin(request.user) or is_owner or is_assigned_agent or is_lease_tenant):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        docs = LeaseDocument.objects.filter(lease=lease).select_related('uploaded_by', 'signed_by')
+        serializer = LeaseDocumentSerializer(docs, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        if not (is_admin(request.user) or is_owner or is_assigned_agent):
+            return Response({'detail': 'Only the landlord or assigned agent can upload documents.'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = LeaseDocumentSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(lease=lease, uploaded_by=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(
+    methods=['POST'],
+    summary="Sign a lease document (tenant only)",
+    examples=[
+        OpenApiExample("Sign document", request_only=True, value={}),
+    ],
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def lease_document_sign(request, lease_id, doc_id):
+    try:
+        lease = Lease.objects.select_related('unit__property', 'tenant').get(pk=lease_id)
+    except Lease.DoesNotExist:
+        return Response({'detail': 'Lease not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if lease.tenant != request.user:
+        return Response({'detail': 'Only the tenant on this lease can sign documents.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        doc = LeaseDocument.objects.get(pk=doc_id, lease=lease)
+    except LeaseDocument.DoesNotExist:
+        return Response({'detail': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if doc.signed_by is not None:
+        return Response({'detail': 'Document has already been signed.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    doc.signed_by = request.user
+    doc.signed_at = timezone.now()
+    doc.save()
+    return Response(LeaseDocumentSerializer(doc).data)
+
+
+# ── Property Reviews ──────────────────────────────────────────────────────────
+
+@extend_schema(methods=['GET'], summary="List reviews for a property")
+@extend_schema(
+    methods=['POST'],
+    summary="Submit a review for a property (tenants with a lease only)",
+    examples=[
+        OpenApiExample("Submit property review", request_only=True, value={
+            "rating": 4,
+            "comment": "Great location and well-maintained property.",
+        })
+    ],
+)
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def property_review_list_create(request, property_id):
+    try:
+        prop = Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return Response({'detail': 'Property not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        reviews = PropertyReview.objects.filter(property=prop).select_related('reviewer')
+        serializer = PropertyReviewSerializer(reviews, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        user = request.user
+        is_owner = prop.owner == user
+        if not is_owner:
+            if is_tenant(user):
+                has_lease = Lease.objects.filter(unit__property=prop, tenant=user).exists()
+                if not has_lease:
+                    return Response({'detail': 'You must have or have had a lease on this property to review it.'}, status=status.HTTP_403_FORBIDDEN)
+            else:
+                return Response({'detail': 'Only tenants with a lease or the property owner can review this property.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = PropertyReviewSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                serializer.save(reviewer=user, property=prop)
+            except IntegrityError:
+                return Response({'detail': 'You have already reviewed this property.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(methods=['GET'], summary="Get a property review")
+@extend_schema(
+    methods=['PATCH'],
+    summary="Update own property review",
+    examples=[
+        OpenApiExample("Update review", request_only=True, value={"rating": 5, "comment": "Updated: excellent property."})
+    ],
+)
+@extend_schema(methods=['DELETE'], summary="Delete own property review")
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def property_review_detail(request, property_id, review_id):
+    try:
+        prop = Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return Response({'detail': 'Property not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        review = PropertyReview.objects.select_related('reviewer').get(pk=review_id, property=prop)
+    except PropertyReview.DoesNotExist:
+        return Response({'detail': 'Review not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response(PropertyReviewSerializer(review).data)
+
+    if review.reviewer != request.user:
+        return Response({'detail': 'You can only modify your own review.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'PATCH':
+        serializer = PropertyReviewSerializer(review, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        review.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Tenant Reviews ────────────────────────────────────────────────────────────
+
+@extend_schema(methods=['GET'], summary="List tenant reviews for a property")
+@extend_schema(
+    methods=['POST'],
+    summary="Submit a review for a tenant (landlord only)",
+    examples=[
+        OpenApiExample("Submit tenant review", request_only=True, value={
+            "tenant": 5,
+            "rating": 5,
+            "comment": "Excellent tenant. Always paid on time and kept the unit clean.",
+        })
+    ],
+)
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def tenant_review_list_create(request, property_id):
+    try:
+        prop = Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return Response({'detail': 'Property not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    is_owner = prop.owner == request.user
+    is_assigned_agent = is_agent_for(request.user, prop)
+
+    if not (is_admin(request.user) or is_owner or is_assigned_agent):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        reviews = TenantReview.objects.filter(property=prop).select_related('reviewer', 'tenant')
+        serializer = TenantReviewSerializer(reviews, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        if not (is_landlord(request.user) and is_owner):
+            return Response({'detail': 'Only the property owner can review tenants.'}, status=status.HTTP_403_FORBIDDEN)
+
+        tenant_id = request.data.get('tenant')
+        from authentication.models import CustomUser as AuthUser
+        try:
+            reviewed_tenant = AuthUser.objects.get(pk=tenant_id, role__name='Tenant')
+        except AuthUser.DoesNotExist:
+            return Response({'detail': 'Tenant user not found.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        has_lease = Lease.objects.filter(unit__property=prop, tenant=reviewed_tenant).exists()
+        if not has_lease:
+            return Response({'detail': 'This tenant has not had a lease on this property.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = TenantReviewSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                serializer.save(reviewer=request.user, tenant=reviewed_tenant, property=prop)
+            except IntegrityError:
+                return Response({'detail': 'You have already reviewed this tenant for this property.'}, status=status.HTTP_400_BAD_REQUEST)
+            # TODO: trigger notification after merge
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(methods=['GET'], summary="Get a tenant review")
+@extend_schema(
+    methods=['PATCH'],
+    summary="Update own tenant review",
+    examples=[
+        OpenApiExample("Update tenant review", request_only=True, value={"rating": 4, "comment": "Good tenant overall."})
+    ],
+)
+@extend_schema(methods=['DELETE'], summary="Delete own tenant review")
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def tenant_review_detail(request, property_id, review_id):
+    try:
+        prop = Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return Response({'detail': 'Property not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        review = TenantReview.objects.select_related('reviewer', 'tenant').get(pk=review_id, property=prop)
+    except TenantReview.DoesNotExist:
+        return Response({'detail': 'Review not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    is_owner = prop.owner == request.user
+    is_assigned_agent = is_agent_for(request.user, prop)
+
+    if request.method == 'GET':
+        if not (is_admin(request.user) or is_owner or is_assigned_agent):
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        return Response(TenantReviewSerializer(review).data)
+
+    if review.reviewer != request.user:
+        return Response({'detail': 'You can only modify your own review.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'PATCH':
+        serializer = TenantReviewSerializer(review, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'DELETE':
+        review.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

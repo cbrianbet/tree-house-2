@@ -6,7 +6,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework import status
 from django.contrib.auth import get_user_model
 from authentication.models import Role
-from .models import Property, Unit, PropertyAgent, Lease, TenantApplication
+from .models import Property, Unit, PropertyAgent, Lease, TenantApplication, LeaseDocument, PropertyReview, TenantReview
 
 User = get_user_model()
 
@@ -472,3 +472,238 @@ class LandlordDashboardTests(APITestCase):
         self.assertIn('by_property', perf)
         self.assertEqual(len(perf['by_property']), 1)
         self.assertEqual(perf['by_property'][0]['name'], self.prop.name)
+
+
+class LeaseDocumentTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.agent, self.agent_token = make_user('agent1', 'Agent')
+        self.other_user, self.other_token = make_user('other1', 'Tenant')
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+
+        PropertyAgent.objects.create(property=self.prop, agent=self.agent, appointed_by=self.landlord)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def _doc_list_url(self):
+        return reverse('lease-document-list-create', args=[self.lease.id])
+
+    def _doc_sign_url(self, doc_id):
+        return reverse('lease-document-sign', args=[self.lease.id, doc_id])
+
+    def _make_doc(self):
+        return LeaseDocument.objects.create(
+            lease=self.lease,
+            document_type='lease_agreement',
+            title='Test Doc',
+            file_url='https://example.com/doc.pdf',
+            uploaded_by=self.landlord,
+        )
+
+    def test_landlord_can_upload_document(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(self._doc_list_url(), {
+            'document_type': 'lease_agreement',
+            'title': 'Main Lease',
+            'file_url': 'https://example.com/lease.pdf',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['uploaded_by'], self.landlord.id)
+
+    def test_tenant_can_list_documents(self):
+        self._make_doc()
+        self.auth(self.tenant_token)
+        response = self.client.get(self._doc_list_url())
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_agent_can_upload_document(self):
+        self.auth(self.agent_token)
+        response = self.client.post(self._doc_list_url(), {
+            'document_type': 'notice',
+            'title': 'Agent Notice',
+            'file_url': 'https://example.com/notice.pdf',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_unrelated_user_cannot_list(self):
+        self.auth(self.other_token)
+        response = self.client.get(self._doc_list_url())
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_can_sign_document(self):
+        doc = self._make_doc()
+        self.auth(self.tenant_token)
+        response = self.client.post(self._doc_sign_url(doc.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['signed_by'], self.tenant.id)
+        self.assertIsNotNone(response.data['signed_at'])
+
+    def test_cannot_sign_twice(self):
+        doc = self._make_doc()
+        doc.signed_by = self.tenant
+        from django.utils import timezone
+        doc.signed_at = timezone.now()
+        doc.save()
+        self.auth(self.tenant_token)
+        response = self.client.post(self._doc_sign_url(doc.id))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_only_tenant_can_sign(self):
+        doc = self._make_doc()
+        self.auth(self.landlord_token)
+        response = self.client.post(self._doc_sign_url(doc.id))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class PropertyReviewTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.tenant_no_lease, self.tenant_no_lease_token = make_user('tenant2', 'Tenant')
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def _list_url(self):
+        return reverse('property-review-list-create', args=[self.prop.id])
+
+    def _detail_url(self, review_id):
+        return reverse('property-review-detail', args=[self.prop.id, review_id])
+
+    def test_tenant_with_lease_can_review(self):
+        self.auth(self.tenant_token)
+        response = self.client.post(self._list_url(), {'rating': 4, 'comment': 'Good place.'})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['rating'], 4)
+
+    def test_tenant_without_lease_cannot_review(self):
+        self.auth(self.tenant_no_lease_token)
+        response = self.client.post(self._list_url(), {'rating': 3, 'comment': 'Nice.'})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_duplicate_review_rejected(self):
+        PropertyReview.objects.create(reviewer=self.tenant, property=self.prop, rating=4)
+        self.auth(self.tenant_token)
+        response = self.client.post(self._list_url(), {'rating': 5, 'comment': 'Again.'})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_landlord_cannot_review_property(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(self._list_url(), {'rating': 5, 'comment': 'My own property.'})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_reviewer_can_update_own_review(self):
+        review = PropertyReview.objects.create(reviewer=self.tenant, property=self.prop, rating=3)
+        self.auth(self.tenant_token)
+        response = self.client.patch(self._detail_url(review.id), {'rating': 5, 'comment': 'Updated.'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['rating'], 5)
+
+    def test_reviewer_can_delete_own_review(self):
+        review = PropertyReview.objects.create(reviewer=self.tenant, property=self.prop, rating=3)
+        self.auth(self.tenant_token)
+        response = self.client.delete(self._detail_url(review.id))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(PropertyReview.objects.filter(pk=review.id).exists())
+
+    def test_other_user_cannot_edit_review(self):
+        review = PropertyReview.objects.create(reviewer=self.tenant, property=self.prop, rating=3)
+        self.auth(self.tenant_no_lease_token)
+        response = self.client.patch(self._detail_url(review.id), {'rating': 1})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TenantReviewTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.tenant2, self.tenant2_token = make_user('tenant2', 'Tenant')
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def _list_url(self):
+        return reverse('tenant-review-list-create', args=[self.prop.id])
+
+    def _detail_url(self, review_id):
+        return reverse('tenant-review-detail', args=[self.prop.id, review_id])
+
+    def test_landlord_can_review_tenant(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(self._list_url(), {
+            'tenant': self.tenant.id,
+            'rating': 5,
+            'comment': 'Great tenant.',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['rating'], 5)
+
+    def test_landlord_cannot_review_tenant_without_lease(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(self._list_url(), {
+            'tenant': self.tenant2.id,
+            'rating': 4,
+            'comment': 'No lease.',
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_cannot_review_another_tenant(self):
+        self.auth(self.tenant_token)
+        response = self.client.post(self._list_url(), {
+            'tenant': self.tenant2.id,
+            'rating': 3,
+            'comment': 'Not allowed.',
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_public_view_shows_name_not_pii(self):
+        TenantReview.objects.create(
+            reviewer=self.landlord, tenant=self.tenant, property=self.prop, rating=4
+        )
+        self.auth(self.landlord_token)
+        response = self.client.get(self._list_url())
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        review_data = response.data[0]
+        # name fields present
+        self.assertIn('tenant_name', review_data)
+        self.assertIn('reviewer_name', review_data)
+        # PII fields must NOT be present
+        self.assertNotIn('national_id', review_data)
+        self.assertNotIn('emergency_contact_name', review_data)
+        self.assertNotIn('emergency_contact_phone', review_data)
+
+    def test_reviewer_can_update_own_review(self):
+        review = TenantReview.objects.create(
+            reviewer=self.landlord, tenant=self.tenant, property=self.prop, rating=3
+        )
+        self.auth(self.landlord_token)
+        response = self.client.patch(self._detail_url(review.id), {'rating': 4, 'comment': 'Updated.'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['rating'], 4)
+
+    def test_duplicate_review_rejected(self):
+        TenantReview.objects.create(
+            reviewer=self.landlord, tenant=self.tenant, property=self.prop, rating=5
+        )
+        self.auth(self.landlord_token)
+        response = self.client.post(self._list_url(), {
+            'tenant': self.tenant.id,
+            'rating': 4,
+            'comment': 'Duplicate.',
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication
+from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview
 
 
 class PropertySerializer(serializers.ModelSerializer):
@@ -46,3 +46,41 @@ class TenantApplicationSerializer(serializers.ModelSerializer):
         model = TenantApplication
         fields = ['id', 'unit', 'applicant', 'status', 'message', 'reviewed_by', 'reviewed_at', 'created_at']
         read_only_fields = ['applicant', 'status', 'reviewed_by', 'reviewed_at', 'created_at']
+
+
+class LeaseDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeaseDocument
+        fields = ['id', 'lease', 'document_type', 'title', 'file_url', 'uploaded_by', 'signed_by', 'signed_at', 'created_at']
+        read_only_fields = ['id', 'lease', 'uploaded_by', 'signed_by', 'signed_at', 'created_at']
+
+
+class PropertyReviewSerializer(serializers.ModelSerializer):
+    reviewer_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PropertyReview
+        fields = ['id', 'reviewer', 'reviewer_name', 'property', 'rating', 'comment', 'created_at']
+        read_only_fields = ['id', 'reviewer', 'property', 'created_at']
+
+    def get_reviewer_name(self, obj):
+        full_name = f"{obj.reviewer.first_name} {obj.reviewer.last_name}".strip()
+        return full_name if full_name else obj.reviewer.username
+
+
+class TenantReviewSerializer(serializers.ModelSerializer):
+    reviewer_name = serializers.SerializerMethodField()
+    tenant_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TenantReview
+        fields = ['id', 'reviewer', 'reviewer_name', 'tenant', 'tenant_name', 'property', 'rating', 'comment', 'created_at']
+        read_only_fields = ['id', 'reviewer', 'property', 'created_at']
+
+    def get_reviewer_name(self, obj):
+        full_name = f"{obj.reviewer.first_name} {obj.reviewer.last_name}".strip()
+        return full_name if full_name else obj.reviewer.username
+
+    def get_tenant_name(self, obj):
+        full_name = f"{obj.tenant.first_name} {obj.tenant.last_name}".strip()
+        return full_name if full_name else obj.tenant.username

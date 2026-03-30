@@ -2,7 +2,7 @@ from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.http import HttpResponseRedirect
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
@@ -50,6 +50,8 @@ def role_list(request):
         serializer = RoleSerializer(roles, many=True)
         return Response(serializer.data)
     elif request.method == 'POST':
+        if not request.user.is_staff:
+            return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
         serializer = RoleSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -81,7 +83,11 @@ def role_detail(request, pk):
     if request.method == 'GET':
         serializer = RoleSerializer(role)
         return Response(serializer.data)
-    elif request.method == 'PUT':
+
+    if not request.user.is_staff:
+        return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'PUT':
         serializer = RoleSerializer(role, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -97,10 +103,14 @@ def _profile_list_view(model, serializer_class):
     @permission_classes([IsAuthenticated])
     def view(request):
         if request.method == 'GET':
+            if not request.user.is_staff:
+                return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
             profiles = model.objects.select_related('user').all()
             serializer = serializer_class(profiles, many=True)
             return Response(serializer.data)
         elif request.method == 'POST':
+            if not request.user.is_staff:
+                return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
             serializer = serializer_class(data=request.data)
             if serializer.is_valid():
                 serializer.save()
@@ -118,6 +128,10 @@ def _profile_detail_view(model, serializer_class):
         except model.DoesNotExist:
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        is_owner = profile.user == request.user
+        if not (is_owner or request.user.is_staff):
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
         if request.method == 'GET':
             serializer = serializer_class(profile)
             return Response(serializer.data)
@@ -128,6 +142,8 @@ def _profile_detail_view(model, serializer_class):
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         elif request.method == 'DELETE':
+            if not request.user.is_staff:
+                return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
             profile.delete()
             return Response({'deleted': True}, status=status.HTTP_204_NO_CONTENT)
     return view

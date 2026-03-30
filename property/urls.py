@@ -16,4 +16,13 @@ urlpatterns = [
     path('applications/<int:pk>/', views.application_detail, name='application-detail'),
     # Landlord dashboard
     path('dashboard/', views.landlord_dashboard, name='landlord-dashboard'),
+    # Lease documents
+    path('leases/<int:lease_id>/documents/', views.lease_document_list_create, name='lease-document-list-create'),
+    path('leases/<int:lease_id>/documents/<int:doc_id>/sign/', views.lease_document_sign, name='lease-document-sign'),
+    # Property reviews
+    path('properties/<int:property_id>/reviews/', views.property_review_list_create, name='property-review-list-create'),
+    path('properties/<int:property_id>/reviews/<int:review_id>/', views.property_review_detail, name='property-review-detail'),
+    # Tenant reviews
+    path('properties/<int:property_id>/tenant-reviews/', views.tenant_review_list_create, name='tenant-review-list-create'),
+    path('properties/<int:property_id>/tenant-reviews/<int:review_id>/', views.tenant_review_detail, name='tenant-review-detail'),
 ]

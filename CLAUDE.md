@@ -1,7 +1,7 @@
 # Tree House 2 — CLAUDE.md
 
 ## Project Overview
-Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin, Artisan roles) with role-specific profiles. Agents are appointed by landlords to manage specific properties. Includes rent collection, Stripe payments, invoice auto-generation, email reminders, and a maintenance request/bidding system where artisans bid on work and tenants/landlords accept bids.
+Property management REST API built with Django. Handles user auth (Tenant, Landlord, Agent, Admin, Artisan roles) with role-specific profiles. Agents are appointed by landlords to manage specific properties. Includes rent collection, Stripe payments, invoice auto-generation, email reminders, a maintenance request/bidding system where artisans bid on work, in-app notifications, polling-based messaging between users, dispute tracking with mediation support, lease document storage with digital signing, and property/tenant review systems.
 
 ## Tech Stack
 - **Django 4.2** + **Django REST Framework**
@@ -46,6 +46,9 @@ python manage.py test authentication
 python manage.py test property
 python manage.py test billing
 python manage.py test maintenance
+python manage.py test notifications
+python manage.py test messaging
+python manage.py test disputes
 python manage.py process_billing      # generate invoices, apply late fees, send reminders
 ```
 
@@ -84,6 +87,25 @@ maintenance/        # maintenance request & bidding app
   views.py          # views + permission helpers (is_artisan, can_view_request, can_manage_request)
   urls.py           # all URL patterns under /api/maintenance/
   migrations/       # 0001 initial schema
+notifications/      # in-app notification delivery
+  models.py         # Notification (user, notification_type, title, body, action_url, is_read, created_at)
+  utils.py          # create_notification(user, type, title, body, action_url='') — cross-app utility
+  serializers.py    # NotificationSerializer
+  views.py          # list (with ?unread=true filter), mark-read, mark-all-read
+  urls.py           # /api/notifications/
+  migrations/       # 0001 depends on authentication.0007
+messaging/          # polling-based user-to-user messaging
+  models.py         # Conversation (property FK nullable, subject, created_by), ConversationParticipant (unique: conversation+user), Message (conversation, sender, body)
+  serializers.py    # ConversationSerializer (unread_count, last_message), MessageSerializer (sender_name)
+  views.py          # list/create conversations, detail, list/post messages, mark-read
+  urls.py           # /api/messaging/conversations/
+  migrations/       # 0001 depends on authentication.0007 + property.0006
+disputes/           # dispute tracking and mediation
+  models.py         # Dispute (created_by, property, unit nullable, dispute_type, status, title, description, resolved_by, resolved_at), DisputeMessage (dispute, sender, body)
+  serializers.py    # DisputeSerializer, DisputeMessageSerializer (sender_name)
+  views.py          # list/create disputes, detail/status-patch, list/post messages; status machine enforced
+  urls.py           # /api/disputes/
+  migrations/       # 0001 depends on authentication.0007 + property.0006
 templates/          # Django templates directory
 ```
 
@@ -108,9 +130,13 @@ Seeded via data migrations. Roles are:
 | POST | `/api/auth/register/` | Register new user |
 | POST | `/api/auth/login/` | Login, returns token |
 | POST | `/api/auth/logout/` | Logout |
-| GET | `/api/auth/user/` | Current user details |
+| GET | `/api/auth/user/` | Current user details (dj-rest-auth) |
 | POST | `/api/auth/password/reset/` | Request password reset email |
 | POST | `/api/auth/password/reset/confirm/` | Confirm password reset |
+| POST | `/api/auth/password/change/` | Change password (authenticated) |
+| GET/PATCH | `/api/auth/me/` | View / update own account (name, email, phone) |
+| GET/PATCH | `/api/auth/me/profile/` | View / update own role profile (auto-creates if missing) |
+| GET/PATCH | `/api/auth/me/notifications/` | View / update notification preferences (auto-creates if missing) |
 | GET/POST | `/api/auth/roles/` | List / create roles |
 | GET/PUT/DELETE | `/api/auth/roles/<pk>/` | Role detail |
 | GET/POST | `/api/auth/profiles/tenant/` | List / create tenant profiles |
@@ -141,6 +167,12 @@ Seeded via data migrations. Roles are:
 | GET/POST | `/api/property/applications/` | Landlord=own units, Tenant=own, Admin=all |
 | GET/PUT | `/api/property/applications/<pk>/` | Landlord: approve/reject — Tenant: withdraw |
 | GET | `/api/property/dashboard/` | Landlord / Admin |
+| GET/POST | `/api/property/leases/<lease_id>/documents/` | Owner/Agent=POST, Tenant on lease=GET |
+| POST | `/api/property/leases/<lease_id>/documents/<doc_id>/sign/` | Tenant on lease only |
+| GET/POST | `/api/property/properties/<property_id>/reviews/` | GET=any auth, POST=Tenant (active/past lease) or Landlord (owns property) |
+| GET/PATCH/DELETE | `/api/property/properties/<property_id>/reviews/<review_id>/` | Reviewer or Admin |
+| GET/POST | `/api/property/properties/<property_id>/tenant-reviews/` | GET=Owner/Agent/Admin, POST=Landlord/Agent |
+| GET/PATCH/DELETE | `/api/property/properties/<property_id>/tenant-reviews/<review_id>/` | Reviewer or Admin |
 
 ### Billing (`/api/billing/`)
 | Method | URL | Who |
@@ -185,6 +217,37 @@ submitted/open → cancelled  (request submitter only)
 any → rejected           (property owner only)
 ```
 
+### Notifications (`/api/notifications/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET | `/api/notifications/` | Own notifications; `?unread=true` filter |
+| POST | `/api/notifications/<pk>/read/` | Own notification only |
+| POST | `/api/notifications/read-all/` | All own notifications |
+
+### Messaging (`/api/messaging/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET/POST | `/api/messaging/conversations/` | Participants only |
+| GET | `/api/messaging/conversations/<pk>/` | Participants only |
+| GET/POST | `/api/messaging/conversations/<pk>/messages/` | Participants only |
+| POST | `/api/messaging/conversations/<pk>/read/` | Participants only |
+
+### Disputes (`/api/disputes/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET | `/api/disputes/` | Admin=all, Landlord=own properties, Agent=assigned, Tenant=own |
+| POST | `/api/disputes/` | Tenant (active lease) or Landlord (owns property) |
+| GET | `/api/disputes/<pk>/` | Participants (creator, owner, assigned agent) or Admin |
+| PATCH | `/api/disputes/<pk>/` | Status transitions (see below) |
+| GET/POST | `/api/disputes/<pk>/messages/` | Any dispute participant |
+
+**Dispute status machine:**
+```
+open → under_review   (property owner or admin)
+under_review → resolved  (admin only)
+open/under_review → closed  (dispute creator only)
+```
+
 ### Docs
 | GET | `/api/docs/` | Swagger UI |
 | GET | `/api/redoc/` | ReDoc |
@@ -207,9 +270,12 @@ any → rejected           (property owner only)
 
 ### Permissions
 - Permission helpers live at the top of each app's `views.py`: `is_landlord`, `is_admin`, `is_agent_for`, `is_artisan`
-- Role name checks must match the seeded casing exactly — roles are title-cased: `'Landlord'`, `'Admin'`, `'Agent'`, `'Tenant'`, `'Artisan'`
+- Role name checks must use the constants on `Role`: `Role.ADMIN`, `Role.LANDLORD`, `Role.AGENT`, `Role.TENANT`, `Role.ARTISAN` — never hardcode strings
 - Agents can read and write but never delete — delete is owner/admin only
 - Maintenance: submitter (tenant or landlord) owns accept/reject bids and marks completion; artisan owns in_progress transition
+
+### Python 3.14 + Django 4.2 gotcha
+Any uncaught exception (IntegrityError, etc.) that propagates out of a view during tests will crash the test runner via Django's error logging template (`super().__copy__()` incompatibility in `django.template.context.BaseContext`). Always wrap `serializer.save()` in `try/except IntegrityError` when unique constraints could be violated and return HTTP 400 instead of letting the error propagate.
 
 ### Migrations
 - Always write migrations manually — psycopg2 won't build from source in this venv so `makemigrations` can't run
@@ -224,6 +290,7 @@ any → rejected           (property owner only)
 ### Tests
 - Every new endpoint gets tests covering: list, create, retrieve, update, delete, and 404
 - Each test class has a `setUp` that creates a role, user, and token, and sets client credentials
+- Use `Role.objects.get_or_create(name=role_name)` not `Role.objects.create(name=role_name)` — roles are seeded by data migration 0004 and unique constraint will fail on create
 - Use the `make_user(username, role_name)` helper pattern (see `property/tests.py`) to reduce setUp boilerplate
 - Tests live in the app's `tests.py`
 - Permission boundary tests are required — test that the wrong role gets 403, not just that the right role succeeds
@@ -267,6 +334,32 @@ any → rejected           (property owner only)
 - Billing and maintenance data are imported lazily inside the view to avoid cross-app import issues
 - "Almost ending leases" threshold is 60 days; "adverts" are units with `is_public=True` and `is_occupied=False`
 - Performance ranking is by net income (`payments + additional_income − expenses`) for the current calendar month
+
+### Notifications
+- `create_notification(user, type, title, body, action_url='')` lives in `notifications/utils.py` — import from there in any app that needs to trigger a notification
+- Each app currently has `# TODO: trigger notification after merge` comments where notifications should be wired in
+- `_maybe_send_email()` in `notifications/utils.py` checks `NotificationPreference` before sending email with `fail_silently=True`
+
+### Messaging
+- Conversations are identified by `property` + `subject` — no deduplication enforced, clients should check before creating
+- `last_read_at` on `ConversationParticipant` is updated via `POST /api/messaging/conversations/<pk>/read/`
+- `unread_count` on `ConversationSerializer` is computed dynamically: messages after `last_read_at`
+
+### Disputes
+- `dispute_type` choices: `rent`, `maintenance`, `noise`, `damage`, `lease`, `other`
+- `status` choices: `open`, `under_review`, `resolved`, `closed`
+- Artisans cannot view or create disputes
+- Status transitions are enforced in `_validate_status_transition()` in `disputes/views.py`
+
+### Lease Documents
+- `file_url` is a plain `CharField(500)` — document storage is external; the API stores URLs, not files
+- Signing sets `signed_by` (FK to user) and `signed_at` (timestamp) — no cryptographic signing
+- Only the tenant on the lease can sign; only the owner/agent can upload
+
+### Reviews
+- `PropertyReview`: one review per reviewer per property (`unique_together`); reviewer must have a lease (tenant) or own the property (landlord)
+- `TenantReview`: one review per reviewer+tenant+property combination; reviewer must be landlord or agent on the property
+- `reviewer_name` and `tenant_name` are computed fields (first+last name, falls back to username) — no raw PII fields exposed
 
 ### General
 - Read a file before editing it
