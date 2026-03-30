@@ -49,6 +49,9 @@ python manage.py test maintenance
 python manage.py test notifications
 python manage.py test messaging
 python manage.py test disputes
+python manage.py test moving
+python manage.py test neighborhood
+python manage.py test dashboard
 python manage.py process_billing                        # generate invoices, apply late fees, send reminders
 python manage.py match_saved_searches                   # match saved searches against recently published units
 python manage.py match_saved_searches --days 7          # check last 7 days instead of 1
@@ -63,12 +66,12 @@ lsof -ti:8000 | xargs kill -9
 ```
 treeHouse/          # project config (settings, urls, wsgi)
 authentication/     # user management app
-  models.py         # Role, CustomUser, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile
+  models.py         # Role, CustomUser, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, MovingCompanyProfile
   serializers.py    # serializers for all models
   views.py          # function-based views using @api_view
   urls.py           # all URL patterns under /api/auth/
   adapter.py        # CustomAccountAdapter — saves extra fields on registration
-  migrations/       # 0004 seeds roles, 0005 adds ArtisanProfile, 0006 seeds Artisan role
+  migrations/       # 0004 seeds roles, 0005 adds ArtisanProfile, 0006 seeds Artisan role, 0008 adds MovingCompanyProfile, 0009 seeds MovingCompany role
 property/           # property management app
   models.py         # Property, Unit, Lease, PropertyImage, PropertyAgent, TenantApplication
   serializers.py    # serializers for all models
@@ -108,6 +111,24 @@ disputes/           # dispute tracking and mediation
   views.py          # list/create disputes, detail/status-patch, list/post messages; status machine enforced
   urls.py           # /api/disputes/
   migrations/       # 0001 depends on authentication.0007 + property.0006
+moving/             # moving company directory, bookings, and reviews
+  models.py         # MovingBooking (company, customer, moving_date, moving_time, pickup/delivery_address, status, estimated_price), MovingCompanyReview (company, reviewer, booking nullable, rating, comment)
+  serializers.py    # MovingBookingSerializer, MovingCompanyReviewSerializer, MovingCompanyListSerializer (avg rating)
+  views.py          # company directory, booking CRUD + status machine, review CRUD
+  urls.py           # /api/moving/
+  migrations/       # 0001 depends on authentication.0009
+neighborhood/       # neighborhood insights per property (schools, hospitals, safety, etc.)
+  models.py         # NeighborhoodInsight (property, insight_type, name, address, distance_km, rating, lat, lng, notes, added_by)
+  serializers.py    # NeighborhoodInsightSerializer
+  views.py          # list/create insights (landlord/agent/admin), detail/patch/delete (adder or admin)
+  urls.py           # /api/neighborhood/
+  migrations/       # 0001 depends on authentication.0009 + property.0008
+dashboard/          # cross-cutting dashboard endpoints for all roles
+  models.py         # RoleChangeLog (user, changed_by, old_role, new_role, changed_at, reason)
+  serializers.py    # AdminUserSerializer, AdminUserUpdateSerializer, RoleChangeLogSerializer
+  views.py          # admin overview + user mgmt + review moderation; tenant/artisan/agent/moving-company dashboards
+  urls.py           # /api/dashboard/
+  migrations/       # 0001 depends on authentication.0009
 templates/          # Django templates directory
 ```
 
@@ -123,6 +144,7 @@ Seeded via data migrations. Roles are:
 - **Agent** — has `AgentProfile` (agency_name, license_number, commission_rate); appointed to properties by landlords
 - **Tenant** — has `TenantProfile` (national_id, emergency_contact_name, emergency_contact_phone)
 - **Artisan** — has `ArtisanProfile` (trade, bio, rating, verified); trade choices: plumbing, electrical, carpentry, painting, masonry, other
+- **MovingCompany** — has `MovingCompanyProfile` (company_name, description, phone, address, city, service_areas, base_price, price_per_km, is_verified, is_active); registers to offer relocation services
 
 ## API Endpoints
 
@@ -149,6 +171,8 @@ Seeded via data migrations. Roles are:
 | GET/PUT/DELETE | `/api/auth/profiles/agent/<pk>/` | Agent profile detail |
 | GET/POST | `/api/auth/profiles/artisan/` | List / create artisan profiles |
 | GET/PUT/DELETE | `/api/auth/profiles/artisan/<pk>/` | Artisan profile detail |
+| GET/POST | `/api/auth/profiles/moving-company/` | List / create moving company profiles |
+| GET/PUT/DELETE | `/api/auth/profiles/moving-company/<pk>/` | Moving company profile detail |
 
 ### Property (`/api/property/`)
 | Method | URL | Who |
@@ -252,6 +276,48 @@ open → under_review   (property owner or admin)
 under_review → resolved  (admin only)
 open/under_review → closed  (dispute creator only)
 ```
+
+### Moving (`/api/moving/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET | `/api/moving/companies/` | Any auth — active companies only |
+| GET | `/api/moving/companies/<pk>/` | Any auth |
+| GET/POST | `/api/moving/bookings/` | Any auth — scoped: company sees own bookings, others see theirs |
+| GET/PUT | `/api/moving/bookings/<pk>/` | Customer or company that owns the booking |
+| GET/POST | `/api/moving/companies/<pk>/reviews/` | Any auth |
+| GET/PATCH/DELETE | `/api/moving/companies/<pk>/reviews/<review_id>/` | Reviewer or Admin |
+
+**Moving booking status machine:**
+```
+pending → confirmed / cancelled  (company)
+confirmed → in_progress          (company)
+confirmed → cancelled            (customer or company)
+in_progress → completed          (company)
+pending → cancelled              (customer)
+```
+
+### Neighborhood Insights (`/api/neighborhood/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET | `/api/neighborhood/properties/<id>/insights/` | Any auth; `?type=` filter |
+| POST | `/api/neighborhood/properties/<id>/insights/` | Property owner, assigned agent, Admin |
+| GET | `/api/neighborhood/properties/<id>/insights/<pk>/` | Any auth |
+| PATCH/DELETE | `/api/neighborhood/properties/<id>/insights/<pk>/` | Adder or Admin |
+
+Insight type choices: `school`, `hospital`, `safety`, `transit`, `restaurant`, `other`
+
+### Dashboards (`/api/dashboard/`)
+| Method | URL | Who |
+|--------|-----|-----|
+| GET | `/api/dashboard/admin/` | Admin — system overview (users, properties, billing, maintenance, disputes, moving) |
+| GET | `/api/dashboard/admin/users/` | Admin — all users; `?role=`, `?search=`, `?is_active=` |
+| GET/PUT | `/api/dashboard/admin/users/<pk>/` | Admin — user detail + role history / change role or active status |
+| GET | `/api/dashboard/admin/moderation/reviews/` | Admin — all reviews; `?type=property\|tenant` |
+| DELETE | `/api/dashboard/admin/moderation/reviews/<pk>/` | Admin — delete any review; `?type=property\|tenant` required |
+| GET | `/api/dashboard/tenant/` | Tenant — active lease, invoice summary, open maintenance, unread notifications |
+| GET | `/api/dashboard/artisan/` | Artisan — open jobs matching trade, active bids, completed this month |
+| GET | `/api/dashboard/agent/` | Agent — assigned properties + occupancy, pending applications, open maintenance, active disputes |
+| GET | `/api/dashboard/moving-company/` | MovingCompany — bookings by status, avg rating, recent reviews |
 
 ### Docs
 | GET | `/api/docs/` | Swagger UI |
@@ -373,6 +439,15 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - `PropertyReview`: one review per reviewer per property (`unique_together`); reviewer must have a lease (tenant) or own the property (landlord)
 - `TenantReview`: one review per reviewer+tenant+property combination; reviewer must be landlord or agent on the property
 - `reviewer_name` and `tenant_name` are computed fields (first+last name, falls back to username) — no raw PII fields exposed
+
+### Dashboards
+- All dashboard views are in `dashboard/` — they import cross-app models lazily inside view functions to avoid circular imports (same pattern as `property/views.py` landlord dashboard)
+- All dashboard endpoints are computed on the fly — no stored snapshot models
+- Admin overview excludes `is_staff=True` users from role counts (admins aren't in `by_role`)
+- Admin user management `PUT /api/dashboard/admin/users/<pk>/` updates the role FK directly — no profile migration; logs to `RoleChangeLog` only when the role actually changes (old_role ≠ new_role)
+- `RoleChangeLog` lives in `dashboard/models.py`; fields: user, changed_by, old_role, new_role, changed_at, reason (optional text)
+- Content moderation DELETE requires `?type=property|tenant` query param to resolve which review model to delete from
+- Role-specific dashboards enforce access at the top of the view (403 if wrong role) — no shared permission helper
 
 ### General
 - Read a file before editing it
