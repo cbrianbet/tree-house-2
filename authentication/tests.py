@@ -1,4 +1,6 @@
 from django.urls import reverse
+from django.test import override_settings
+from unittest.mock import patch
 from rest_framework.test import APITestCase
 from rest_framework.authtoken.models import Token
 from rest_framework import status
@@ -66,7 +68,12 @@ class RegistrationTestCase(APITestCase):
     def setUp(self):
         self.role, _ = Role.objects.get_or_create(name="Tenant", defaults={"description": "Test role"})
 
-    def test_register_user_with_phone_and_role(self):
+    # Python 3.14 broke super().__copy__() in Django 4.2's BaseContext, which the test
+    # client triggers whenever allauth renders a template (email confirm or login message).
+    # Mocking add_message prevents all allauth template rendering during this test.
+    @override_settings(ACCOUNT_EMAIL_VERIFICATION='none')
+    @patch('allauth.account.adapter.DefaultAccountAdapter.add_message')
+    def test_register_user_with_phone_and_role(self, _mock_msg):
         url = reverse('rest_register')
         data = {
             "first_name": "Test",
@@ -79,6 +86,7 @@ class RegistrationTestCase(APITestCase):
             "role": self.role.id
         }
         response = self.client.post(url, data, format='json')
+        # dj-rest-auth returns 204 (no token) when EMAIL_VERIFICATION is 'optional' (default)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         user = CustomUser.objects.get(username="testuser1")
         self.assertEqual(user.phone, "0123456789")
@@ -255,7 +263,7 @@ class MeAccountTests(APITestCase):
         self.assertEqual(response.data['phone'], '0700000000')
 
     def test_update_account_name_and_phone(self):
-        response = self.client.put(reverse('me-account'), {
+        response = self.client.patch(reverse('me-account'), {
             'first_name': 'Bob',
             'last_name': 'Jones',
             'phone': '0711111111',
@@ -267,13 +275,13 @@ class MeAccountTests(APITestCase):
         self.assertEqual(self.user.first_name, 'Bob')
 
     def test_update_account_email(self):
-        response = self.client.put(reverse('me-account'), {'email': 'newemail@example.com'})
+        response = self.client.patch(reverse('me-account'), {'email': 'newemail@example.com'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['email'], 'newemail@example.com')
 
     def test_role_is_read_only(self):
         other_role, _ = Role.objects.get_or_create(name='Admin')
-        response = self.client.put(reverse('me-account'), {'role': other_role.id})
+        response = self.client.patch(reverse('me-account'), {'role': other_role.id})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertEqual(self.user.role.name, 'Tenant')
@@ -298,7 +306,7 @@ class MeProfileTests(APITestCase):
 
     def test_tenant_update_profile(self):
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
-        response = self.client.put(reverse('me-profile'), {
+        response = self.client.patch(reverse('me-profile'), {
             'national_id': 'NAT123',
             'emergency_contact_name': 'Jane',
             'emergency_contact_phone': '0722000000',
@@ -314,7 +322,7 @@ class MeProfileTests(APITestCase):
 
     def test_landlord_update_profile(self):
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.landlord_token.key}')
-        response = self.client.put(reverse('me-profile'), {'company_name': 'My Properties Ltd'})
+        response = self.client.patch(reverse('me-profile'), {'company_name': 'My Properties Ltd'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['company_name'], 'My Properties Ltd')
 
@@ -337,7 +345,7 @@ class MeNotificationsTests(APITestCase):
         self.assertTrue(response.data['lease_expiry_notice'])
 
     def test_update_preferences(self):
-        response = self.client.put(reverse('me-notifications'), {
+        response = self.client.patch(reverse('me-notifications'), {
             'payment_received': False,
             'new_maintenance_request': False,
         })
@@ -348,7 +356,7 @@ class MeNotificationsTests(APITestCase):
         self.assertTrue(response.data['email_notifications'])
 
     def test_disable_all_emails(self):
-        response = self.client.put(reverse('me-notifications'), {'email_notifications': False})
+        response = self.client.patch(reverse('me-notifications'), {'email_notifications': False})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['email_notifications'])
         prefs = NotificationPreference.objects.get(user=self.user)

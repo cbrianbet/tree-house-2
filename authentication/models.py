@@ -3,6 +3,12 @@ from django.db import models
 
 
 class Role(models.Model):
+    ADMIN = 'Admin'
+    LANDLORD = 'Landlord'
+    AGENT = 'Agent'
+    TENANT = 'Tenant'
+    ARTISAN = 'Artisan'
+
     name = models.CharField(max_length=50, unique=True)
     description = models.TextField(blank=True)
 

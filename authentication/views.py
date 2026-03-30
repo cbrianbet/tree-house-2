@@ -12,7 +12,7 @@ from .serializers import (
     AgentProfileSerializer, ArtisanProfileSerializer,
     AccountUpdateSerializer, NotificationPreferenceSerializer,
 )
-from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, NotificationPreference
+from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, NotificationPreference, CustomUser
 
 
 def email_confirm_redirect(request, key):
@@ -250,10 +250,10 @@ artisan_profile_detail = extend_schema(methods=['GET'], summary="Get artisan pro
 # ---------------------------------------------------------------------------
 
 _ROLE_PROFILE_MAP = {
-    'Tenant': (TenantProfile, TenantProfileSerializer),
-    'Landlord': (LandlordProfile, LandlordProfileSerializer),
-    'Agent': (AgentProfile, AgentProfileSerializer),
-    'Artisan': (ArtisanProfile, ArtisanProfileSerializer),
+    Role.TENANT: (TenantProfile, TenantProfileSerializer),
+    Role.LANDLORD: (LandlordProfile, LandlordProfileSerializer),
+    Role.AGENT: (AgentProfile, AgentProfileSerializer),
+    Role.ARTISAN: (ArtisanProfile, ArtisanProfileSerializer),
 }
 
 
@@ -262,8 +262,8 @@ _ROLE_PROFILE_MAP = {
     summary="Get current user's account details",
 )
 @extend_schema(
-    methods=['PUT'],
-    summary="Update current user's account details",
+    methods=['PATCH'],
+    summary="Partially update current user's account details",
     examples=[
         OpenApiExample(
             "Update account",
@@ -277,7 +277,7 @@ _ROLE_PROFILE_MAP = {
         )
     ],
 )
-@api_view(['GET', 'PUT'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def me_account(request):
     if request.method == 'GET':
@@ -295,8 +295,8 @@ def me_account(request):
     summary="Get current user's role-specific profile",
 )
 @extend_schema(
-    methods=['PUT'],
-    summary="Update current user's role-specific profile",
+    methods=['PATCH'],
+    summary="Partially update current user's role-specific profile",
     examples=[
         OpenApiExample(
             "Update tenant profile",
@@ -320,7 +320,7 @@ def me_account(request):
         ),
     ],
 )
-@api_view(['GET', 'PUT'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def me_profile(request):
     role_name = request.user.role.name if request.user.role else None
@@ -346,8 +346,8 @@ def me_profile(request):
     summary="Get current user's notification preferences",
 )
 @extend_schema(
-    methods=['PUT'],
-    summary="Update current user's notification preferences",
+    methods=['PATCH'],
+    summary="Partially update current user's notification preferences",
     examples=[
         OpenApiExample(
             "Update notifications",
@@ -365,7 +365,7 @@ def me_profile(request):
         )
     ],
 )
-@api_view(['GET', 'PUT'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def me_notifications(request):
     prefs, _ = NotificationPreference.objects.get_or_create(user=request.user)
