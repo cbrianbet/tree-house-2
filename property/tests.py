@@ -1,10 +1,12 @@
+from datetime import date, timedelta
+
 from django.urls import reverse
 from rest_framework.test import APITestCase
 from rest_framework.authtoken.models import Token
 from rest_framework import status
 from django.contrib.auth import get_user_model
 from authentication.models import Role
-from .models import Property, Unit, PropertyAgent
+from .models import Property, Unit, PropertyAgent, Lease, TenantApplication
 
 User = get_user_model()
 
@@ -257,3 +259,216 @@ class PropertyAgentTests(APITestCase):
             reverse('property-agent-detail', args=[self.property.id, self.agent.id])
         )
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+def make_property(owner):
+    return Property.objects.create(name='Test Property', property_type='apartment', owner=owner, created_by=owner)
+
+
+def make_unit(prop, owner, is_public=True):
+    return Unit.objects.create(property=prop, name='Unit 1', price='45000', created_by=owner, is_public=is_public)
+
+
+def make_lease(unit, tenant, end_date=None):
+    return Lease.objects.create(
+        unit=unit, tenant=tenant,
+        start_date=date.today(),
+        end_date=end_date,
+        rent_amount='45000',
+        is_active=True,
+    )
+
+
+class TenantApplicationTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.tenant2, self.tenant2_token = make_user('tenant2', 'Tenant')
+        self.agent, self.agent_token = make_user('agent1', 'Agent')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_tenant_can_submit_application(self):
+        self.auth(self.tenant_token)
+        response = self.client.post(reverse('application-list'), {
+            'unit': self.unit.id, 'message': 'I am interested.',
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['applicant'], self.tenant.id)
+        self.assertEqual(response.data['status'], 'pending')
+
+    def test_non_tenant_cannot_apply(self):
+        self.auth(self.agent_token)
+        response = self.client.post(reverse('application-list'), {'unit': self.unit.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_cannot_apply_to_occupied_unit(self):
+        self.unit.is_occupied = True
+        self.unit.save()
+        self.auth(self.tenant_token)
+        response = self.client.post(reverse('application-list'), {'unit': self.unit.id})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_duplicate_application_rejected(self):
+        TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.tenant_token)
+        response = self.client.post(reverse('application-list'), {'unit': self.unit.id})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_landlord_sees_own_applications(self):
+        TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('application-list'))
+        self.assertEqual(len(response.data), 1)
+
+    def test_tenant_sees_own_applications_only(self):
+        TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        TenantApplication.objects.create(unit=self.unit, applicant=self.tenant2)
+        self.auth(self.tenant_token)
+        response = self.client.get(reverse('application-list'))
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['applicant'], self.tenant.id)
+
+    def test_landlord_can_approve_application(self):
+        app = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.landlord_token)
+        response = self.client.put(reverse('application-detail', args=[app.id]), {
+            'status': 'approved',
+            'start_date': str(date.today()),
+            'end_date': str(date.today() + timedelta(days=365)),
+            'rent_amount': '45000.00',
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'approved')
+        # Lease created
+        self.unit.refresh_from_db()
+        self.assertTrue(self.unit.is_occupied)
+        self.assertTrue(Lease.objects.filter(unit=self.unit, tenant=self.tenant).exists())
+
+    def test_approval_rejects_competing_applications(self):
+        app1 = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        app2 = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant2)
+        self.auth(self.landlord_token)
+        self.client.put(reverse('application-detail', args=[app1.id]), {
+            'status': 'approved',
+            'start_date': str(date.today()),
+            'rent_amount': '45000.00',
+        })
+        app2.refresh_from_db()
+        self.assertEqual(app2.status, 'rejected')
+
+    def test_approval_requires_start_date_and_rent(self):
+        app = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.landlord_token)
+        response = self.client.put(reverse('application-detail', args=[app.id]), {'status': 'approved'})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_landlord_can_reject_application(self):
+        app = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.landlord_token)
+        response = self.client.put(reverse('application-detail', args=[app.id]), {'status': 'rejected'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'rejected')
+
+    def test_tenant_can_withdraw_application(self):
+        app = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.tenant_token)
+        response = self.client.put(reverse('application-detail', args=[app.id]), {'status': 'withdrawn'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'withdrawn')
+
+    def test_tenant_cannot_approve(self):
+        app = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.tenant_token)
+        response = self.client.put(reverse('application-detail', args=[app.id]), {
+            'status': 'approved', 'start_date': str(date.today()), 'rent_amount': '45000.00',
+        })
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_landlord_cannot_access_application(self):
+        other_landlord, other_token = make_user('landlord2', 'Landlord')
+        app = TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {other_token.key}')
+        response = self.client.get(reverse('application-detail', args=[app.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class LandlordDashboardTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_landlord_can_access_dashboard(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('properties', response.data)
+        self.assertIn('adverts', response.data)
+        self.assertIn('applications', response.data)
+        self.assertIn('leases_ending_soon', response.data)
+        self.assertIn('billing', response.data)
+        self.assertIn('maintenance', response.data)
+        self.assertIn('performance', response.data)
+
+    def test_tenant_cannot_access_dashboard(self):
+        self.auth(self.tenant_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_vacant_unit_count(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(response.data['properties']['vacant_units'], 1)
+        self.assertEqual(response.data['properties']['occupied_units'], 0)
+
+    def test_advert_appears_when_public_and_vacant(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(response.data['adverts']['count'], 1)
+
+    def test_advert_disappears_when_occupied(self):
+        self.unit.is_occupied = True
+        self.unit.save()
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(response.data['adverts']['count'], 0)
+
+    def test_pending_application_counted(self):
+        TenantApplication.objects.create(unit=self.unit, applicant=self.tenant)
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(response.data['applications']['pending'], 1)
+
+    def test_lease_ending_within_60_days_shown(self):
+        lease = make_lease(self.unit, self.tenant, end_date=date.today() + timedelta(days=30))
+        self.unit.is_occupied = True
+        self.unit.save()
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(len(response.data['leases_ending_soon']), 1)
+        self.assertEqual(response.data['leases_ending_soon'][0]['days_remaining'], 30)
+
+    def test_lease_ending_far_future_not_shown(self):
+        make_lease(self.unit, self.tenant, end_date=date.today() + timedelta(days=120))
+        self.unit.is_occupied = True
+        self.unit.save()
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        self.assertEqual(len(response.data['leases_ending_soon']), 0)
+
+    def test_performance_section_present(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('landlord-dashboard'))
+        perf = response.data['performance']
+        self.assertIn('period', perf)
+        self.assertIn('by_property', perf)
+        self.assertEqual(len(perf['by_property']), 1)
+        self.assertEqual(perf['by_property'][0]['name'], self.prop.name)
