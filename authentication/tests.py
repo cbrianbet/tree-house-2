@@ -13,15 +13,28 @@ User = get_user_model()
 class RoleAPITests(APITestCase):
     def setUp(self):
         self.role, _ = Role.objects.get_or_create(name="Admin", defaults={"description": "Administrator role"})
-        self.user = User.objects.create_user(username="testuser", password="testpass", role=self.role)
+        self.user = User.objects.create_user(username="testuser", password="testpass", role=self.role, is_staff=True)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
 
     def test_role_list_get(self):
+        # Seed a non-admin role so the list is non-empty
+        Role.objects.get_or_create(name='Tenant')
         url = reverse('role-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(any(r['name'] == "Admin" for r in response.data))
+        names = [r['name'] for r in response.data]
+        self.assertNotIn('Admin', names)
+        self.assertIn('Tenant', names)
+
+    def test_role_list_get_no_auth(self):
+        # Registration page calls this unauthenticated — must work
+        self.client.credentials()
+        Role.objects.get_or_create(name='Landlord')
+        response = self.client.get(reverse('role-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [r['name'] for r in response.data]
+        self.assertNotIn('Admin', names)
 
     def test_role_list_post(self):
         url = reverse('role-list')
@@ -98,7 +111,7 @@ class RegistrationTestCase(APITestCase):
 class TenantProfileAPITests(APITestCase):
     def setUp(self):
         self.role, _ = Role.objects.get_or_create(name="Tenant", defaults={"description": "Tenant role"})
-        self.user = User.objects.create_user(username="tenant1", password="testpass", role=self.role)
+        self.user = User.objects.create_user(username="tenant1", password="testpass", role=self.role, is_staff=True)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
         self.profile = TenantProfile.objects.create(
@@ -146,7 +159,7 @@ class TenantProfileAPITests(APITestCase):
 class LandlordProfileAPITests(APITestCase):
     def setUp(self):
         self.role, _ = Role.objects.get_or_create(name="Landlord", defaults={"description": "Landlord role"})
-        self.user = User.objects.create_user(username="landlord1", password="testpass", role=self.role)
+        self.user = User.objects.create_user(username="landlord1", password="testpass", role=self.role, is_staff=True)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
         self.profile = LandlordProfile.objects.create(
@@ -194,7 +207,7 @@ class LandlordProfileAPITests(APITestCase):
 class AgentProfileAPITests(APITestCase):
     def setUp(self):
         self.role, _ = Role.objects.get_or_create(name="Agent", defaults={"description": "Agent role"})
-        self.user = User.objects.create_user(username="agent1", password="testpass", role=self.role)
+        self.user = User.objects.create_user(username="agent1", password="testpass", role=self.role, is_staff=True)
         self.token = Token.objects.create(user=self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
         self.profile = AgentProfile.objects.create(

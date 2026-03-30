@@ -597,9 +597,15 @@ class PropertyReviewTests(APITestCase):
         response = self.client.post(self._list_url(), {'rating': 5, 'comment': 'Again.'})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_landlord_cannot_review_property(self):
+    def test_property_owner_can_review_own_property(self):
         self.auth(self.landlord_token)
         response = self.client.post(self._list_url(), {'rating': 5, 'comment': 'My own property.'})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_landlord_without_ownership_cannot_review(self):
+        other_landlord, other_token = make_user('landlord2', 'Landlord')
+        self.auth(other_token)
+        response = self.client.post(self._list_url(), {'rating': 3, 'comment': 'Not my property.'})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_reviewer_can_update_own_review(self):
@@ -707,3 +713,204 @@ class TenantReviewTests(APITestCase):
             'comment': 'Duplicate.',
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class PublicUnitFilterTests(APITestCase):
+
+    def setUp(self):
+        self.landlord, _ = make_user('search_landlord', 'Landlord')
+        self.prop = make_property(self.landlord)
+        self.prop.latitude = -1.2921
+        self.prop.longitude = 36.8172
+        self.prop.property_type = 'apartment'
+        self.prop.save()
+
+        self.unit_cheap = Unit.objects.create(
+            property=self.prop, name='Cheap', price='15000', bedrooms=1,
+            bathrooms=1, is_public=True, amenities='wifi', created_by=self.landlord,
+        )
+        self.unit_expensive = Unit.objects.create(
+            property=self.prop, name='Expensive', price='80000', bedrooms=3,
+            bathrooms=2, parking_space=True, is_public=True, amenities='gym pool', created_by=self.landlord,
+        )
+        self.unit_private = Unit.objects.create(
+            property=self.prop, name='Private', price='30000', bedrooms=2,
+            is_public=False, created_by=self.landlord,
+        )
+        self.url = reverse('public-units')
+
+    def test_returns_only_public_units(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        names = [u['name'] for u in response.data]
+        self.assertIn('Cheap', names)
+        self.assertNotIn('Private', names)
+
+    def test_filter_price_min(self):
+        response = self.client.get(self.url, {'price_min': 50000})
+        names = [u['name'] for u in response.data]
+        self.assertIn('Expensive', names)
+        self.assertNotIn('Cheap', names)
+
+    def test_filter_price_max(self):
+        response = self.client.get(self.url, {'price_max': 20000})
+        names = [u['name'] for u in response.data]
+        self.assertIn('Cheap', names)
+        self.assertNotIn('Expensive', names)
+
+    def test_filter_bedrooms(self):
+        response = self.client.get(self.url, {'bedrooms': 3})
+        names = [u['name'] for u in response.data]
+        self.assertIn('Expensive', names)
+        self.assertNotIn('Cheap', names)
+
+    def test_filter_amenities(self):
+        response = self.client.get(self.url, {'amenities': 'gym'})
+        names = [u['name'] for u in response.data]
+        self.assertIn('Expensive', names)
+        self.assertNotIn('Cheap', names)
+
+    def test_filter_parking(self):
+        response = self.client.get(self.url, {'parking': 'true'})
+        names = [u['name'] for u in response.data]
+        self.assertIn('Expensive', names)
+        self.assertNotIn('Cheap', names)
+
+    def test_filter_property_type(self):
+        other_prop = make_property(self.landlord)
+        other_prop.property_type = 'house'
+        other_prop.save()
+        Unit.objects.create(property=other_prop, name='House Unit', price='25000', is_public=True, created_by=self.landlord)
+        response = self.client.get(self.url, {'property_type': 'house'})
+        names = [u['name'] for u in response.data]
+        self.assertIn('House Unit', names)
+        self.assertNotIn('Cheap', names)
+
+    def test_location_filter_includes_nearby(self):
+        # Same location, radius 10km — should include units
+        response = self.client.get(self.url, {'lat': -1.2921, 'lng': 36.8172, 'radius_km': 10})
+        self.assertEqual(response.status_code, 200)
+        names = [u['name'] for u in response.data]
+        self.assertIn('Cheap', names)
+
+    def test_location_filter_excludes_far_away(self):
+        # Far-away coordinates, small radius — should exclude all
+        response = self.client.get(self.url, {'lat': 0.0, 'lng': 0.0, 'radius_km': 1})
+        self.assertEqual(response.status_code, 200)
+        names = [u['name'] for u in response.data]
+        self.assertNotIn('Cheap', names)
+
+
+class SavedSearchTests(APITestCase):
+
+    def setUp(self):
+        self.tenant, self.tenant_token = make_user('ss_tenant', 'Tenant')
+        self.landlord, self.landlord_token = make_user('ss_landlord', 'Landlord')
+        self.other, self.other_token = make_user('ss_other', 'Tenant')
+        self.list_url = reverse('saved-search-list')
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def _detail_url(self, pk):
+        return reverse('saved-search-detail', args=[pk])
+
+    def test_create_saved_search(self):
+        self.auth(self.tenant_token)
+        data = {
+            'name': 'Westlands apartments',
+            'filters': {'price_max': 50000, 'bedrooms': 2, 'property_type': 'apartment'},
+            'notify_on_match': True,
+        }
+        response = self.client.post(self.list_url, data, format='json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['name'], 'Westlands apartments')
+
+    def test_list_own_saved_searches(self):
+        from property.models import SavedSearch
+        SavedSearch.objects.create(user=self.tenant, name='Search A', filters={})
+        SavedSearch.objects.create(user=self.other, name='Search B', filters={})
+        self.auth(self.tenant_token)
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, 200)
+        names = [s['name'] for s in response.data]
+        self.assertIn('Search A', names)
+        self.assertNotIn('Search B', names)
+
+    def test_update_saved_search(self):
+        from property.models import SavedSearch
+        search = SavedSearch.objects.create(user=self.tenant, name='Old name', filters={})
+        self.auth(self.tenant_token)
+        response = self.client.patch(self._detail_url(search.pk), {'name': 'New name'}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['name'], 'New name')
+
+    def test_delete_saved_search(self):
+        from property.models import SavedSearch
+        search = SavedSearch.objects.create(user=self.tenant, name='To delete', filters={})
+        self.auth(self.tenant_token)
+        response = self.client.delete(self._detail_url(search.pk))
+        self.assertEqual(response.status_code, 204)
+
+    def test_other_user_cannot_access_search(self):
+        from property.models import SavedSearch
+        search = SavedSearch.objects.create(user=self.tenant, name='Private', filters={})
+        self.auth(self.other_token)
+        response = self.client.get(self._detail_url(search.pk))
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_returns_401(self):
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_notification_sent_when_unit_published_matching_search(self):
+        from property.models import SavedSearch
+        from notifications.models import Notification
+        prop = make_property(self.landlord)
+        unit = make_unit(prop, self.landlord)
+        unit.price = 30000
+        unit.bedrooms = 2
+        unit.is_public = False
+        unit.save()
+
+        SavedSearch.objects.create(
+            user=self.tenant,
+            name='Match me',
+            filters={'price_max': 50000, 'bedrooms': 2},
+            notify_on_match=True,
+        )
+
+        # Publish the unit via the API
+        self.auth(self.landlord_token)
+        response = self.client.put(
+            reverse('unit-detail', args=[unit.pk]),
+            {'is_public': True},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Notification.objects.filter(user=self.tenant, notification_type='new_listing').exists())
+
+    def test_no_notification_when_unit_does_not_match(self):
+        from property.models import SavedSearch
+        from notifications.models import Notification
+        prop = make_property(self.landlord)
+        unit = make_unit(prop, self.landlord)
+        unit.price = 100000
+        unit.bedrooms = 1
+        unit.is_public = False
+        unit.save()
+
+        SavedSearch.objects.create(
+            user=self.tenant,
+            name='No match',
+            filters={'price_max': 30000, 'bedrooms': 3},
+            notify_on_match=True,
+        )
+
+        self.auth(self.landlord_token)
+        self.client.put(
+            reverse('unit-detail', args=[unit.pk]),
+            {'is_public': True},
+            format='json',
+        )
+        self.assertFalse(Notification.objects.filter(user=self.tenant, notification_type='new_listing').exists())

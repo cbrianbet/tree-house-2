@@ -25,4 +25,7 @@ urlpatterns = [
     # Tenant reviews
     path('properties/<int:property_id>/tenant-reviews/', views.tenant_review_list_create, name='tenant-review-list-create'),
     path('properties/<int:property_id>/tenant-reviews/<int:review_id>/', views.tenant_review_detail, name='tenant-review-detail'),
+    # Saved searches
+    path('saved-searches/', views.saved_search_list_create, name='saved-search-list'),
+    path('saved-searches/<int:pk>/', views.saved_search_detail, name='saved-search-detail'),
 ]

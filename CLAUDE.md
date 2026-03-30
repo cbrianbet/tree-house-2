@@ -49,7 +49,9 @@ python manage.py test maintenance
 python manage.py test notifications
 python manage.py test messaging
 python manage.py test disputes
-python manage.py process_billing      # generate invoices, apply late fees, send reminders
+python manage.py process_billing                        # generate invoices, apply late fees, send reminders
+python manage.py match_saved_searches                   # match saved searches against recently published units
+python manage.py match_saved_searches --days 7          # check last 7 days instead of 1
 ```
 
 Kill port 8000 if already in use:
@@ -173,6 +175,9 @@ Seeded via data migrations. Roles are:
 | GET/PATCH/DELETE | `/api/property/properties/<property_id>/reviews/<review_id>/` | Reviewer or Admin |
 | GET/POST | `/api/property/properties/<property_id>/tenant-reviews/` | GET=Owner/Agent/Admin, POST=Landlord/Agent |
 | GET/PATCH/DELETE | `/api/property/properties/<property_id>/tenant-reviews/<review_id>/` | Reviewer or Admin |
+| GET | `/api/property/units/public/` | Public (no auth); supports query-param filtering |
+| GET/POST | `/api/property/saved-searches/` | Any auth — own only (Admin=all) |
+| GET/PATCH/DELETE | `/api/property/saved-searches/<pk>/` | Owner or Admin |
 
 ### Billing (`/api/billing/`)
 | Method | URL | Who |
@@ -355,6 +360,14 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - `file_url` is a plain `CharField(500)` — document storage is external; the API stores URLs, not files
 - Signing sets `signed_by` (FK to user) and `signed_at` (timestamp) — no cryptographic signing
 - Only the tenant on the lease can sign; only the owner/agent can upload
+
+### Search & Saved Searches
+- `GET /api/property/units/public/` supports query params: `price_min`, `price_max`, `bedrooms`, `bathrooms`, `property_type`, `amenities` (keyword), `parking=true`, `lat`+`lng`+`radius_km` (bounding-box distance filter)
+- `SavedSearch.filters` is a free-form JSONField using the same keys as the query params above
+- When a unit's `is_public` changes `False → True` via `PUT /api/property/units/<pk>/`, `notify_saved_search_matches(unit)` is called inline — this fires `new_listing` notifications to all matching saved searches
+- `match_saved_searches` management command re-runs matching for recently published units (use `--days N` to control lookback window); intended for catch-up after downtime
+- `Unit.tour_url` stores an external 3D/virtual tour URL — optional, plain CharField(500)
+- `TenantApplication.documents` is a JSONField list of uploaded document URLs (ID, payslips, references)
 
 ### Reviews
 - `PropertyReview`: one review per reviewer per property (`unique_together`); reviewer must have a lease (tenant) or own the property (landlord)

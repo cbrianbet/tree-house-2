@@ -43,14 +43,15 @@ def password_reset_confirm_redirect(request, uidb64, token):
     ],
 )
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def role_list(request):
     if request.method == 'GET':
-        roles = Role.objects.all()
+        # Exclude Admin from public listing — it is not a self-assignable role
+        roles = Role.objects.exclude(name=Role.ADMIN)
         serializer = RoleSerializer(roles, many=True)
         return Response(serializer.data)
     elif request.method == 'POST':
-        if not request.user.is_staff:
+        if not (request.user.is_authenticated and request.user.is_staff):
             return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
         serializer = RoleSerializer(data=request.data)
         if serializer.is_valid():
@@ -142,8 +143,6 @@ def _profile_detail_view(model, serializer_class):
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         elif request.method == 'DELETE':
-            if not request.user.is_staff:
-                return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
             profile.delete()
             return Response({'deleted': True}, status=status.HTTP_204_NO_CONTENT)
     return view
