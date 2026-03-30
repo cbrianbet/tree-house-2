@@ -26,19 +26,20 @@ def _maybe_send_email(user, notification_type, title, body):
     try:
         prefs = NotificationPreference.objects.get(user=user)
     except NotificationPreference.DoesNotExist:
-        return  # no prefs = use defaults (all enabled), but don't send email unless prefs exist
+        # No prefs saved yet — treat as all-enabled (default behaviour)
+        prefs = None
 
-    if not prefs.email_notifications:
+    if prefs is not None and not prefs.email_notifications:
         return
 
-    # Map notification_type to preference flag
+    # Map notification_type to preference flag (None prefs = all True)
     type_to_pref = {
-        'message': True,  # always send message notifications if email_notifications is on
-        'maintenance': prefs.maintenance_updates,
-        'payment': prefs.payment_received,
-        'lease': prefs.lease_expiry_notice,
-        'dispute': True,  # always send dispute notifications
-        'application': prefs.application_status_change,
+        'message': True,
+        'maintenance': prefs.maintenance_updates if prefs else True,
+        'payment': prefs.payment_received if prefs else True,
+        'lease': prefs.lease_expiry_notice if prefs else True,
+        'dispute': True,
+        'application': prefs.application_status_change if prefs else True,
     }
 
     should_send = type_to_pref.get(notification_type, True)

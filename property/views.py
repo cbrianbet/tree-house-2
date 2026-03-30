@@ -34,7 +34,8 @@ def is_agent_for(user, property):
 
 
 def is_tenant(user):
-    return user.is_authenticated and hasattr(user, 'role') and user.role.name == 'Tenant'
+    from authentication.models import Role
+    return user.is_authenticated and hasattr(user, 'role') and user.role.name == Role.TENANT
 
 
 @extend_schema(methods=['GET'], summary="List properties")
@@ -731,18 +732,21 @@ def property_review_list_create(request, property_id):
         return Response(serializer.data)
 
     elif request.method == 'POST':
-        if not is_tenant(request.user):
-            return Response({'detail': 'Only tenants can review properties.'}, status=status.HTTP_403_FORBIDDEN)
-
-        has_lease = Lease.objects.filter(unit__property=prop, tenant=request.user).exists()
-        if not has_lease:
-            return Response({'detail': 'You must have or have had a lease on this property to review it.'}, status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        is_owner = prop.owner == user
+        if not is_owner:
+            if is_tenant(user):
+                has_lease = Lease.objects.filter(unit__property=prop, tenant=user).exists()
+                if not has_lease:
+                    return Response({'detail': 'You must have or have had a lease on this property to review it.'}, status=status.HTTP_403_FORBIDDEN)
+            else:
+                return Response({'detail': 'Only tenants with a lease or the property owner can review this property.'}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = PropertyReviewSerializer(data=request.data)
         if serializer.is_valid():
             try:
-                serializer.save(reviewer=request.user, property=prop)
-            except Exception:
+                serializer.save(reviewer=user, property=prop)
+            except IntegrityError:
                 return Response({'detail': 'You have already reviewed this property.'}, status=status.HTTP_400_BAD_REQUEST)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -840,7 +844,7 @@ def tenant_review_list_create(request, property_id):
         if serializer.is_valid():
             try:
                 serializer.save(reviewer=request.user, tenant=reviewed_tenant, property=prop)
-            except Exception:
+            except IntegrityError:
                 return Response({'detail': 'You have already reviewed this tenant for this property.'}, status=status.HTTP_400_BAD_REQUEST)
             # TODO: trigger notification after merge
             return Response(serializer.data, status=status.HTTP_201_CREATED)

@@ -161,6 +161,16 @@ class MessageTests(APITestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_nonexistent_conversation_get_messages_returns_404(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.landlord_token.key}')
+        response = self.client.get(self._messages_url(99999))
+        self.assertEqual(response.status_code, 404)
+
+    def test_nonexistent_conversation_post_message_returns_404(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.landlord_token.key}')
+        response = self.client.post(self._messages_url(99999), {'body': 'hello'}, format='json')
+        self.assertEqual(response.status_code, 404)
+
 
 class ConversationMarkReadTests(APITestCase):
 

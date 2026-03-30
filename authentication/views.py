@@ -43,15 +43,15 @@ def password_reset_confirm_redirect(request, uidb64, token):
     ],
 )
 @api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def role_list(request):
     if request.method == 'GET':
         roles = Role.objects.all()
         serializer = RoleSerializer(roles, many=True)
         return Response(serializer.data)
     elif request.method == 'POST':
-        if not request.user.is_authenticated:
-            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        if not request.user.is_staff:
+            return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
         serializer = RoleSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -73,7 +73,7 @@ def role_list(request):
 )
 @extend_schema(methods=['DELETE'], summary="Delete a role")
 @api_view(['GET', 'PUT', 'DELETE'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def role_detail(request, pk):
     try:
         role = Role.objects.get(pk=pk)
@@ -83,32 +83,34 @@ def role_detail(request, pk):
     if request.method == 'GET':
         serializer = RoleSerializer(role)
         return Response(serializer.data)
-    elif request.method == 'PUT':
-        if not request.user.is_authenticated:
-            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not request.user.is_staff:
+        return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'PUT':
         serializer = RoleSerializer(role, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     elif request.method == 'DELETE':
-        if not request.user.is_authenticated:
-            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
         role.delete()
         return Response({'deleted': True}, status=status.HTTP_204_NO_CONTENT)
 
 
 def _profile_list_view(model, serializer_class):
     @api_view(['GET', 'POST'])
-    @permission_classes([AllowAny])
+    @permission_classes([IsAuthenticated])
     def view(request):
         if request.method == 'GET':
+            if not request.user.is_staff:
+                return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
             profiles = model.objects.select_related('user').all()
             serializer = serializer_class(profiles, many=True)
             return Response(serializer.data)
         elif request.method == 'POST':
-            if not request.user.is_authenticated:
-                return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+            if not request.user.is_staff:
+                return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
             serializer = serializer_class(data=request.data)
             if serializer.is_valid():
                 serializer.save()
@@ -119,27 +121,29 @@ def _profile_list_view(model, serializer_class):
 
 def _profile_detail_view(model, serializer_class):
     @api_view(['GET', 'PUT', 'DELETE'])
-    @permission_classes([AllowAny])
+    @permission_classes([IsAuthenticated])
     def view(request, pk):
         try:
             profile = model.objects.get(pk=pk)
         except model.DoesNotExist:
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        is_owner = profile.user == request.user
+        if not (is_owner or request.user.is_staff):
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
         if request.method == 'GET':
             serializer = serializer_class(profile)
             return Response(serializer.data)
         elif request.method == 'PUT':
-            if not request.user.is_authenticated:
-                return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
             serializer = serializer_class(profile, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         elif request.method == 'DELETE':
-            if not request.user.is_authenticated:
-                return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+            if not request.user.is_staff:
+                return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
             profile.delete()
             return Response({'deleted': True}, status=status.HTTP_204_NO_CONTENT)
     return view

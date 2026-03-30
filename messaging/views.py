@@ -6,6 +6,7 @@ from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
 from authentication.models import CustomUser
+from property.models import Property
 from .models import Conversation, ConversationParticipant, Message
 from .serializers import ConversationSerializer, MessageSerializer
 
@@ -65,10 +66,17 @@ def conversation_list_create(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    prop = None
+    if property_id:
+        try:
+            prop = Property.objects.get(pk=property_id)
+        except Property.DoesNotExist:
+            return Response({'detail': 'Property not found.'}, status=status.HTTP_400_BAD_REQUEST)
+
     conversation = Conversation.objects.create(
         subject=subject,
         created_by=user,
-        property_id=property_id if property_id else None,
+        property=prop,
     )
 
     # Add creator as participant
