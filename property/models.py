@@ -1,3 +1,4 @@
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 
 from authentication.models import CustomUser
@@ -119,3 +120,54 @@ class TenantApplication(models.Model):
 
 	def __str__(self):
 		return f"Application by {self.applicant.username} for {self.unit}"
+
+
+class LeaseDocument(models.Model):
+	DOCUMENT_TYPES = [
+		('lease_agreement', 'Lease Agreement'),
+		('addendum', 'Addendum'),
+		('notice', 'Notice'),
+		('other', 'Other'),
+	]
+	lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name='documents')
+	document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPES)
+	title = models.CharField(max_length=200)
+	file_url = models.CharField(max_length=500)
+	uploaded_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='uploaded_documents')
+	signed_by = models.ForeignKey(
+		CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name='signed_documents'
+	)
+	signed_at = models.DateTimeField(null=True, blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	def __str__(self):
+		return f"LeaseDocument({self.title} — {self.document_type})"
+
+
+class PropertyReview(models.Model):
+	reviewer = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='property_reviews')
+	property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='reviews')
+	rating = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+	comment = models.TextField(blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		unique_together = ('reviewer', 'property')
+
+	def __str__(self):
+		return f"PropertyReview({self.reviewer.username} → {self.property.name}: {self.rating}/5)"
+
+
+class TenantReview(models.Model):
+	reviewer = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='tenant_reviews_given')
+	tenant = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='tenant_reviews_received')
+	property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='tenant_reviews')
+	rating = models.IntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+	comment = models.TextField(blank=True)
+	created_at = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		unique_together = ('reviewer', 'tenant', 'property')
+
+	def __str__(self):
+		return f"TenantReview({self.reviewer.username} → {self.tenant.username}: {self.rating}/5)"
