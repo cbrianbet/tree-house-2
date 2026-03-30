@@ -63,6 +63,9 @@ INSTALLED_APPS = [
 
     'billing',
     'maintenance',
+    'notifications',
+    'messaging',
+    'disputes',
 ]
 
 SITE_ID = 1
