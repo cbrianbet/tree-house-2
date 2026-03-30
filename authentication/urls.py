@@ -18,6 +18,7 @@ from .views import (
     landlord_profile_list, landlord_profile_detail,
     agent_profile_list, agent_profile_detail,
     artisan_profile_list, artisan_profile_detail,
+    moving_company_profile_list, moving_company_profile_detail,
     me_account, me_profile, me_notifications,
 )
 
@@ -113,6 +114,9 @@ urlpatterns = [
 
     path('profiles/artisan/', artisan_profile_list, name='artisan-profile-list'),
     path('profiles/artisan/<int:pk>/', artisan_profile_detail, name='artisan-profile-detail'),
+
+    path('profiles/moving-company/', moving_company_profile_list, name='moving-company-profile-list'),
+    path('profiles/moving-company/<int:pk>/', moving_company_profile_detail, name='moving-company-profile-detail'),
 
     # Current user self-service
     path('me/', me_account, name='me-account'),

@@ -66,6 +66,8 @@ INSTALLED_APPS = [
     'notifications',
     'messaging',
     'disputes',
+    'moving',
+    'neighborhood',
 ]
 
 SITE_ID = 1
