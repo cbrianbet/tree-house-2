@@ -2,7 +2,7 @@ from django.conf import settings
 from django.http import HttpResponseRedirect
 from django.http import HttpResponseRedirect
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
@@ -43,13 +43,15 @@ def password_reset_confirm_redirect(request, uidb64, token):
     ],
 )
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def role_list(request):
     if request.method == 'GET':
         roles = Role.objects.all()
         serializer = RoleSerializer(roles, many=True)
         return Response(serializer.data)
     elif request.method == 'POST':
+        if not request.user.is_authenticated:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
         serializer = RoleSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -71,7 +73,7 @@ def role_list(request):
 )
 @extend_schema(methods=['DELETE'], summary="Delete a role")
 @api_view(['GET', 'PUT', 'DELETE'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def role_detail(request, pk):
     try:
         role = Role.objects.get(pk=pk)
@@ -82,25 +84,31 @@ def role_detail(request, pk):
         serializer = RoleSerializer(role)
         return Response(serializer.data)
     elif request.method == 'PUT':
+        if not request.user.is_authenticated:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
         serializer = RoleSerializer(role, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     elif request.method == 'DELETE':
+        if not request.user.is_authenticated:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
         role.delete()
         return Response({'deleted': True}, status=status.HTTP_204_NO_CONTENT)
 
 
 def _profile_list_view(model, serializer_class):
     @api_view(['GET', 'POST'])
-    @permission_classes([IsAuthenticated])
+    @permission_classes([AllowAny])
     def view(request):
         if request.method == 'GET':
             profiles = model.objects.select_related('user').all()
             serializer = serializer_class(profiles, many=True)
             return Response(serializer.data)
         elif request.method == 'POST':
+            if not request.user.is_authenticated:
+                return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
             serializer = serializer_class(data=request.data)
             if serializer.is_valid():
                 serializer.save()
@@ -111,7 +119,7 @@ def _profile_list_view(model, serializer_class):
 
 def _profile_detail_view(model, serializer_class):
     @api_view(['GET', 'PUT', 'DELETE'])
-    @permission_classes([IsAuthenticated])
+    @permission_classes([AllowAny])
     def view(request, pk):
         try:
             profile = model.objects.get(pk=pk)
@@ -122,12 +130,16 @@ def _profile_detail_view(model, serializer_class):
             serializer = serializer_class(profile)
             return Response(serializer.data)
         elif request.method == 'PUT':
+            if not request.user.is_authenticated:
+                return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
             serializer = serializer_class(profile, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         elif request.method == 'DELETE':
+            if not request.user.is_authenticated:
+                return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
             profile.delete()
             return Response({'deleted': True}, status=status.HTTP_204_NO_CONTENT)
     return view
