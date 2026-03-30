@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview
+from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview, SavedSearch
 
 
 class PropertySerializer(serializers.ModelSerializer):
@@ -15,7 +15,7 @@ class UnitSerializer(serializers.ModelSerializer):
         model = Unit
         fields = ['id', 'property', 'name', 'floor', 'description', 'is_occupied',
                   'amenities', 'bedrooms', 'bathrooms', 'parking_space', 'parking_slots',
-                  'is_public', 'price', 'service_charge', 'security_deposit',
+                  'is_public', 'price', 'service_charge', 'security_deposit', 'tour_url',
                   'created_at', 'updated_at', 'created_by', 'updated_by', 'deleted_by']
         read_only_fields = ['property', 'created_by', 'updated_by', 'deleted_by']
 
@@ -44,7 +44,7 @@ class PropertyAgentSerializer(serializers.ModelSerializer):
 class TenantApplicationSerializer(serializers.ModelSerializer):
     class Meta:
         model = TenantApplication
-        fields = ['id', 'unit', 'applicant', 'status', 'message', 'reviewed_by', 'reviewed_at', 'created_at']
+        fields = ['id', 'unit', 'applicant', 'status', 'message', 'documents', 'reviewed_by', 'reviewed_at', 'created_at']
         read_only_fields = ['applicant', 'status', 'reviewed_by', 'reviewed_at', 'created_at']
 
 
@@ -84,3 +84,10 @@ class TenantReviewSerializer(serializers.ModelSerializer):
     def get_tenant_name(self, obj):
         full_name = f"{obj.tenant.first_name} {obj.tenant.last_name}".strip()
         return full_name if full_name else obj.tenant.username
+
+
+class SavedSearchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SavedSearch
+        fields = ['id', 'name', 'filters', 'notify_on_match', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']

@@ -1,3 +1,4 @@
+import math
 from datetime import date, timedelta
 from decimal import Decimal
 from django.db import IntegrityError
@@ -8,11 +9,12 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview
+from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview, SavedSearch
 from .serializers import (
     PropertySerializer, UnitSerializer, PropertyImageSerializer,
     LeaseSerializer, PropertyAgentSerializer, TenantApplicationSerializer,
     LeaseDocumentSerializer, PropertyReviewSerializer, TenantReviewSerializer,
+    SavedSearchSerializer,
 )
 
 
@@ -189,9 +191,13 @@ def unit_detail(request, pk):
         return Response(serializer.data)
 
     elif request.method == 'PUT':
+        was_public = unit.is_public
         serializer = UnitSerializer(unit, data=request.data, partial=True)
         if serializer.is_valid():
-            serializer.save(updated_by=request.user)
+            updated_unit = serializer.save(updated_by=request.user)
+            if not was_public and updated_unit.is_public:
+                from .utils import notify_saved_search_matches
+                notify_saved_search_matches(updated_unit)
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -268,11 +274,86 @@ def lease_list_create(request, unit_id):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@extend_schema(methods=['GET'], summary="List publicly available units (no auth required)")
+@extend_schema(
+    methods=['GET'],
+    summary="Browse publicly available units (no auth required)",
+    examples=[
+        OpenApiExample("Filter by price and bedrooms", request_only=True, value={
+            "price_min": 10000,
+            "price_max": 50000,
+            "bedrooms": 2,
+            "property_type": "apartment",
+        }),
+    ],
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def public_units(request):
-    units = Unit.objects.filter(is_occupied=False, is_public=True)
+    units = Unit.objects.filter(is_occupied=False, is_public=True).select_related('property')
+
+    # Price filters
+    price_min = request.GET.get('price_min')
+    price_max = request.GET.get('price_max')
+    if price_min:
+        try:
+            units = units.filter(price__gte=float(price_min))
+        except ValueError:
+            pass
+    if price_max:
+        try:
+            units = units.filter(price__lte=float(price_max))
+        except ValueError:
+            pass
+
+    # Bedroom / bathroom filters (at least N)
+    bedrooms = request.GET.get('bedrooms')
+    bathrooms = request.GET.get('bathrooms')
+    if bedrooms:
+        try:
+            units = units.filter(bedrooms__gte=int(bedrooms))
+        except ValueError:
+            pass
+    if bathrooms:
+        try:
+            units = units.filter(bathrooms__gte=int(bathrooms))
+        except ValueError:
+            pass
+
+    # Property type
+    property_type = request.GET.get('property_type')
+    if property_type:
+        units = units.filter(property__property_type=property_type)
+
+    # Amenities keyword
+    amenities = request.GET.get('amenities')
+    if amenities:
+        units = units.filter(amenities__icontains=amenities)
+
+    # Parking
+    parking = request.GET.get('parking')
+    if parking and parking.lower() == 'true':
+        units = units.filter(parking_space=True)
+
+    # Location: lat/lng/radius_km bounding box
+    lat_param = request.GET.get('lat')
+    lng_param = request.GET.get('lng')
+    radius_param = request.GET.get('radius_km')
+    if lat_param and lng_param and radius_param:
+        try:
+            lat = float(lat_param)
+            lng = float(lng_param)
+            radius_km = float(radius_param)
+            lat_delta = radius_km / 111.0
+            lng_delta = radius_km / (111.0 * abs(math.cos(math.radians(lat))) or 1)
+            units = units.filter(
+                property__latitude__gte=lat - lat_delta,
+                property__latitude__lte=lat + lat_delta,
+                property__longitude__gte=lng - lng_delta,
+                property__longitude__lte=lng + lng_delta,
+            )
+        except ValueError:
+            pass
+
     serializer = UnitSerializer(units, many=True)
     return Response(serializer.data)
 
@@ -894,3 +975,73 @@ def tenant_review_detail(request, property_id, review_id):
     elif request.method == 'DELETE':
         review.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Saved Searches ────────────────────────────────────────────────────────────
+
+@extend_schema(methods=['GET'], summary="List own saved searches")
+@extend_schema(
+    methods=['POST'],
+    summary="Create a saved search",
+    examples=[
+        OpenApiExample("Apartment in Westlands", request_only=True, value={
+            "name": "2-bed apartments under 50k",
+            "filters": {
+                "price_max": 50000,
+                "bedrooms": 2,
+                "property_type": "apartment",
+                "lat": -1.2921,
+                "lng": 36.8172,
+                "radius_km": 5,
+            },
+            "notify_on_match": True,
+        }),
+    ],
+)
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def saved_search_list_create(request):
+    user = request.user
+
+    if request.method == 'GET':
+        if is_admin(user):
+            searches = SavedSearch.objects.all()
+        else:
+            searches = SavedSearch.objects.filter(user=user)
+        return Response(SavedSearchSerializer(searches, many=True).data)
+
+    serializer = SavedSearchSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save(user=user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(methods=['GET'], summary="Get a saved search")
+@extend_schema(methods=['PATCH'], summary="Update a saved search", examples=[
+    OpenApiExample("Update filters", request_only=True, value={"filters": {"price_max": 60000}}),
+])
+@extend_schema(methods=['DELETE'], summary="Delete a saved search")
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def saved_search_detail(request, pk):
+    try:
+        search = SavedSearch.objects.get(pk=pk)
+    except SavedSearch.DoesNotExist:
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if search.user != request.user and not is_admin(request.user):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        return Response(SavedSearchSerializer(search).data)
+
+    if request.method == 'PATCH':
+        serializer = SavedSearchSerializer(search, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    search.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)

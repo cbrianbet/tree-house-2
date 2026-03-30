@@ -48,6 +48,7 @@ class Unit(models.Model):
 	price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 	service_charge = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 	security_deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+	tour_url = models.CharField(max_length=500, blank=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	updated_at = models.DateTimeField(auto_now=True)
 	deleted_at = models.DateTimeField(null=True, blank=True)
@@ -109,6 +110,7 @@ class TenantApplication(models.Model):
 	applicant = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='applications')
 	status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
 	message = models.TextField(blank=True)
+	documents = models.JSONField(default=list, blank=True)
 	reviewed_by = models.ForeignKey(
 		CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name='reviewed_applications'
 	)
@@ -171,3 +173,18 @@ class TenantReview(models.Model):
 
 	def __str__(self):
 		return f"TenantReview({self.reviewer.username} → {self.tenant.username}: {self.rating}/5)"
+
+
+class SavedSearch(models.Model):
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='saved_searches')
+    name = models.CharField(max_length=200)
+    filters = models.JSONField(default=dict)
+    notify_on_match = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username} — {self.name}"
