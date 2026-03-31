@@ -93,7 +93,17 @@ def conversation_list_create(request):
         except CustomUser.DoesNotExist:
             pass
 
-    # TODO: trigger notification after merge — from notifications.utils import create_notification
+    from notifications.utils import create_notification
+    creator_name = user.get_full_name() or user.username
+    for cp in conversation.participants.select_related('user').all():
+        if cp.user != user:
+            create_notification(
+                cp.user,
+                'message',
+                'New Conversation',
+                f"{creator_name} started a conversation: {conversation.subject or '(no subject)'}",
+                action_url=f'/api/messaging/conversations/{conversation.pk}/',
+            )
 
     serializer = ConversationSerializer(conversation, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -167,7 +177,17 @@ def message_list_create(request, pk):
         body=body,
     )
 
-    # TODO: trigger notification after merge — from notifications.utils import create_notification
+    from notifications.utils import create_notification
+    sender_name = request.user.get_full_name() or request.user.username
+    for cp in conversation.participants.select_related('user').all():
+        if cp.user != request.user:
+            create_notification(
+                cp.user,
+                'message',
+                f'New Message from {sender_name}',
+                body[:200],
+                action_url=f'/api/messaging/conversations/{conversation.pk}/',
+            )
 
     serializer = MessageSerializer(message)
     return Response(serializer.data, status=status.HTTP_201_CREATED)

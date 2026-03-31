@@ -226,6 +226,13 @@ def admin_user_detail(request, pk):
             new_role=new_role,
             reason=request.data.get('reason', ''),
         )
+        from notifications.utils import create_notification
+        create_notification(
+            user,
+            'account',
+            'Your Role Has Been Updated',
+            f"Your account role has been changed from {old_role.name if old_role else 'none'} to {new_role.name}.",
+        )
 
     serializer.save()
     return Response(AdminUserSerializer(user).data)

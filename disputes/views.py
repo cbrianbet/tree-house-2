@@ -128,7 +128,14 @@ def dispute_list_create(request):
                 )
 
         dispute = serializer.save(created_by=user, status='open')
-        # TODO: trigger notification after merge — from notifications.utils import create_notification
+        from notifications.utils import create_notification
+        create_notification(
+            dispute.property.owner,
+            'dispute',
+            'New Dispute Filed',
+            f"A dispute has been filed on your property '{dispute.property.name}': {dispute.title}",
+            action_url=f'/api/disputes/{dispute.pk}/',
+        )
         return Response(DisputeSerializer(dispute).data, status=status.HTTP_201_CREATED)
 
 
@@ -173,7 +180,14 @@ def dispute_detail(request, pk):
             dispute.resolved_at = timezone.now()
         dispute.save()
 
-        # TODO: trigger notification after merge — from notifications.utils import create_notification
+        from notifications.utils import create_notification
+        create_notification(
+            dispute.created_by,
+            'dispute',
+            'Dispute Status Updated',
+            f"Your dispute '{dispute.title}' is now {new_status.replace('_', ' ')}.",
+            action_url=f'/api/disputes/{dispute.pk}/',
+        )
         return Response(DisputeSerializer(dispute).data)
 
 
@@ -244,6 +258,19 @@ def dispute_message_list_create(request, pk):
         serializer = DisputeMessageSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(dispute=dispute, sender=request.user)
-            # TODO: trigger notification after merge — from notifications.utils import create_notification
+            from notifications.utils import create_notification
+            sender_name = request.user.get_full_name() or request.user.username
+            participants = {dispute.created_by, dispute.property.owner}
+            for pa in PropertyAgent.objects.filter(property=dispute.property).select_related('agent'):
+                participants.add(pa.agent)
+            for participant in participants:
+                if participant != request.user:
+                    create_notification(
+                        participant,
+                        'dispute',
+                        'New Message on Dispute',
+                        f"{sender_name} posted a message on dispute '{dispute.title}'.",
+                        action_url=f'/api/disputes/{dispute.pk}/',
+                    )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
