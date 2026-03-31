@@ -90,7 +90,16 @@ def booking_list(request):
     # POST — any auth user can book (except moving companies booking themselves)
     serializer = MovingBookingSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save(customer=request.user)
+        booking = serializer.save(customer=request.user)
+        from notifications.utils import create_notification
+        customer_name = request.user.get_full_name() or request.user.username
+        create_notification(
+            booking.company.user,
+            'moving',
+            'New Moving Booking',
+            f"{customer_name} has booked your moving service for {booking.moving_date}.",
+            action_url=f'/api/moving/bookings/{booking.pk}/',
+        )
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -143,6 +152,16 @@ def booking_detail(request, pk):
     serializer = MovingBookingSerializer(booking, data=request.data, partial=True)
     if serializer.is_valid():
         serializer.save()
+        if new_status:
+            from notifications.utils import create_notification
+            status_label = new_status.replace('_', ' ').title()
+            create_notification(
+                booking.customer,
+                'moving',
+                'Booking Status Updated',
+                f"Your moving booking for {booking.moving_date} is now {status_label}.",
+                action_url=f'/api/moving/bookings/{booking.pk}/',
+            )
         return Response(serializer.data)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

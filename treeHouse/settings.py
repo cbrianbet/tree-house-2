@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'disputes',
     'moving',
     'neighborhood',
+    'dashboard',
 ]
 
 SITE_ID = 1

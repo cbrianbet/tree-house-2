@@ -11,6 +11,8 @@ class Notification(models.Model):
         ('dispute', 'Dispute'),
         ('application', 'Application'),
         ('new_listing', 'New Listing Match'),
+        ('moving', 'Moving Booking'),
+        ('account', 'Account Update'),
     ]
 
     user = models.ForeignKey(

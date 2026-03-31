@@ -927,7 +927,15 @@ def tenant_review_list_create(request, property_id):
                 serializer.save(reviewer=request.user, tenant=reviewed_tenant, property=prop)
             except IntegrityError:
                 return Response({'detail': 'You have already reviewed this tenant for this property.'}, status=status.HTTP_400_BAD_REQUEST)
-            # TODO: trigger notification after merge
+            from notifications.utils import create_notification
+            reviewer_name = request.user.get_full_name() or request.user.username
+            create_notification(
+                reviewed_tenant,
+                'lease',
+                'New Tenant Review',
+                f"{reviewer_name} left a review for you on property '{prop.name}'.",
+                action_url=f'/api/property/properties/{prop.pk}/tenant-reviews/',
+            )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
