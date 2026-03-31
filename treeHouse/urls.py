@@ -34,4 +34,5 @@ urlpatterns = [
     path('api/moving/', include('moving.urls')),
     path('api/neighborhood/', include('neighborhood.urls')),
     path('api/dashboard/', include('dashboard.urls')),
+    path('api/monitoring/', include('monitoring.urls')),
 ]
