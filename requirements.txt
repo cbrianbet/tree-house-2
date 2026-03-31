@@ -15,6 +15,7 @@ djangorestframework==3.16.0
 dotenv==0.9.9
 idna==3.10
 oauthlib==3.3.1
+pillow==12.1.1
 psycopg2-binary
 pycparser==2.22
 PyJWT==2.10.1
