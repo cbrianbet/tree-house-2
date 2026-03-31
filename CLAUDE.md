@@ -408,7 +408,9 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 
 ### Notifications
 - `create_notification(user, type, title, body, action_url='')` lives in `notifications/utils.py` — import from there in any app that needs to trigger a notification
-- Each app currently has `# TODO: trigger notification after merge` comments where notifications should be wired in
+- Always use a lazy import inside the view function: `from notifications.utils import create_notification` — avoids circular imports
+- Notification types: `message`, `maintenance`, `payment`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`
+- Wired events: dispute created → owner; dispute status change → creator; dispute message → all participants except sender; conversation created → all participants except creator; message sent → all participants except sender; tenant review → reviewed tenant; moving booking created → company; booking status change → customer; role change → affected user
 - `_maybe_send_email()` in `notifications/utils.py` checks `NotificationPreference` before sending email with `fail_silently=True`
 
 ### Messaging
