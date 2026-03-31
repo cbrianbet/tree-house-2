@@ -5,8 +5,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 
-from .models import SystemMetric, AlertRule, AlertInstance
-from .serializers import SystemMetricSerializer, AlertRuleSerializer, AlertInstanceSerializer
+from .models import SystemMetric, AlertRule, AlertInstance, ImpersonationLog
+from .serializers import (
+    SystemMetricSerializer, AlertRuleSerializer, AlertInstanceSerializer,
+    ImpersonationLogSerializer,
+)
 
 
 def _is_admin(user):
@@ -218,6 +221,41 @@ def alert_detail(request, pk):
         instance.save()
 
     return Response(AlertInstanceSerializer(instance).data)
+
+
+# ---------------------------------------------------------------------------
+# Monitoring Dashboard
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Impersonation Logs
+# ---------------------------------------------------------------------------
+
+@extend_schema(
+    methods=['GET'],
+    summary="List impersonation logs",
+    parameters=[
+        OpenApiParameter('target_user', int, description='Filter by target user PK'),
+        OpenApiParameter('hours', int, description='Lookback window in hours (default 72)'),
+    ],
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def impersonation_log_list(request):
+    if not _is_admin(request.user):
+        return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    hours = int(request.query_params.get('hours', 72))
+    since = timezone.now() - timezone.timedelta(hours=hours)
+    qs = ImpersonationLog.objects.select_related(
+        'admin', 'target_user', 'target_user__role'
+    ).filter(timestamp__gte=since)
+
+    target_pk = request.query_params.get('target_user')
+    if target_pk:
+        qs = qs.filter(target_user__pk=target_pk)
+
+    return Response(ImpersonationLogSerializer(qs, many=True).data)
 
 
 # ---------------------------------------------------------------------------

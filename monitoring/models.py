@@ -87,3 +87,25 @@ class AlertInstance(models.Model):
 
     def __str__(self):
         return f"Alert: {self.rule.name} @ {self.triggered_at} ({self.status})"
+
+
+class ImpersonationLog(models.Model):
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='impersonation_actions',
+    )
+    target_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='impersonated_by',
+    )
+    path = models.CharField(max_length=255)
+    method = models.CharField(max_length=10)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.admin.username} as {self.target_user.username} [{self.method} {self.path}]"

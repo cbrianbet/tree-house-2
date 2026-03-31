@@ -3,7 +3,7 @@ from rest_framework.test import APIClient
 from rest_framework.authtoken.models import Token
 
 from authentication.models import CustomUser, Role
-from .models import SystemMetric, AlertRule, AlertInstance
+from .models import SystemMetric, AlertRule, AlertInstance, ImpersonationLog
 
 
 def make_user(username, role_name):
@@ -356,3 +356,127 @@ class MonitoringDashboardTestCase(TestCase):
         response = self.client.get('/api/monitoring/dashboard/')
         self.assertEqual(response.data['health_status'], 'healthy')
         self.assertEqual(response.data['active_alert_counts']['critical'], 0)
+
+
+class ImpersonationTestCase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_admin('admin_imp')
+        self.admin_token = Token.objects.create(user=self.admin)
+        self.tenant = make_user('tenant_imp', Role.TENANT)
+        self.tenant_token = Token.objects.create(user=self.tenant)
+        self.landlord = make_user('landlord_imp', Role.LANDLORD)
+        self.landlord_token = Token.objects.create(user=self.landlord)
+
+    def _impersonate(self, target_pk):
+        return {
+            'HTTP_AUTHORIZATION': f'Token {self.admin_token.key}',
+            'HTTP_X_IMPERSONATE_USER': str(target_pk),
+        }
+
+    def test_admin_can_impersonate_tenant(self):
+        response = self.client.get(
+            '/api/auth/me/',
+            **self._impersonate(self.tenant.pk),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], self.tenant.username)
+
+    def test_admin_can_impersonate_landlord(self):
+        response = self.client.get(
+            '/api/auth/me/',
+            **self._impersonate(self.landlord.pk),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], self.landlord.username)
+
+    def test_impersonation_logs_request(self):
+        self.client.get('/api/auth/me/', **self._impersonate(self.tenant.pk))
+        log = ImpersonationLog.objects.filter(
+            admin=self.admin, target_user=self.tenant
+        ).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.method, 'GET')
+        self.assertEqual(log.path, '/api/auth/me/')
+
+    def test_non_admin_cannot_impersonate(self):
+        response = self.client.get(
+            '/api/auth/me/',
+            HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}',
+            HTTP_X_IMPERSONATE_USER=str(self.landlord.pk),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_cannot_impersonate_another_admin(self):
+        other_admin = make_admin('admin_imp2')
+        Token.objects.create(user=other_admin)
+        response = self.client.get(
+            '/api/auth/me/',
+            **self._impersonate(other_admin.pk),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_cannot_impersonate_nonexistent_user(self):
+        response = self.client.get(
+            '/api/auth/me/',
+            **self._impersonate(99999),
+        )
+        # AuthenticationFailed → 401
+        self.assertEqual(response.status_code, 401)
+
+    def test_cannot_impersonate_inactive_user(self):
+        self.tenant.is_active = False
+        self.tenant.save()
+        response = self.client.get(
+            '/api/auth/me/',
+            **self._impersonate(self.tenant.pk),
+        )
+        # AuthenticationFailed → 401
+        self.assertEqual(response.status_code, 401)
+
+    def test_no_header_uses_own_identity(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
+        response = self.client.get('/api/auth/me/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['username'], self.admin.username)
+
+
+class ImpersonationLogListTestCase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = make_admin('admin_logs')
+        self.admin_token = Token.objects.create(user=self.admin)
+        self.tenant = make_user('tenant_logs', Role.TENANT)
+        self.tenant_token = Token.objects.create(user=self.tenant)
+        ImpersonationLog.objects.create(
+            admin=self.admin, target_user=self.tenant,
+            path='/api/billing/invoices/', method='GET',
+        )
+
+    def test_admin_can_list_logs(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
+        response = self.client.get('/api/monitoring/impersonation-logs/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['admin_username'], self.admin.username)
+        self.assertEqual(response.data[0]['target_username'], self.tenant.username)
+
+    def test_non_admin_forbidden(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get('/api/monitoring/impersonation-logs/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_filter_by_target_user(self):
+        other = make_user('other_logs', Role.TENANT)
+        Token.objects.create(user=other)
+        ImpersonationLog.objects.create(
+            admin=self.admin, target_user=other,
+            path='/api/auth/me/', method='GET',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.admin_token.key}')
+        response = self.client.get(
+            f'/api/monitoring/impersonation-logs/?target_user={self.tenant.pk}'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['target_username'], self.tenant.username)
