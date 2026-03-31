@@ -55,6 +55,8 @@ python manage.py test dashboard
 python manage.py process_billing                        # generate invoices, apply late fees, send reminders
 python manage.py match_saved_searches                   # match saved searches against recently published units
 python manage.py match_saved_searches --days 7          # check last 7 days instead of 1
+python manage.py record_metrics                         # snapshot current system metrics to the DB
+python manage.py check_alert_rules                      # evaluate alert rules; fire/auto-resolve AlertInstances
 ```
 
 Kill port 8000 if already in use:
@@ -123,6 +125,14 @@ neighborhood/       # neighborhood insights per property (schools, hospitals, sa
   views.py          # list/create insights (landlord/agent/admin), detail/patch/delete (adder or admin)
   urls.py           # /api/neighborhood/
   migrations/       # 0001 depends on authentication.0009 + property.0008
+monitoring/         # system monitoring, alert rules, and performance reporting (admin only)
+  models.py         # SystemMetric, AlertRule, AlertInstance
+  serializers.py    # serializers for all models
+  views.py          # metric_list, alert_rule_list_create, alert_rule_detail, alert_list, alert_detail, monitoring_dashboard
+  urls.py           # /api/monitoring/
+  management/commands/record_metrics.py     # snapshot current platform metrics to SystemMetric
+  management/commands/check_alert_rules.py  # evaluate enabled rules; fire/auto-resolve AlertInstances, notify admins
+  migrations/       # 0001 initial schema, 0002 seeds 6 default alert rules
 dashboard/          # cross-cutting dashboard endpoints for all roles
   models.py         # RoleChangeLog (user, changed_by, old_role, new_role, changed_at, reason)
   serializers.py    # AdminUserSerializer, AdminUserUpdateSerializer, RoleChangeLogSerializer
@@ -319,6 +329,29 @@ Insight type choices: `school`, `hospital`, `safety`, `transit`, `restaurant`, `
 | GET | `/api/dashboard/agent/` | Agent — assigned properties + occupancy, pending applications, open maintenance, active disputes |
 | GET | `/api/dashboard/moving-company/` | MovingCompany — bookings by status, avg rating, recent reviews |
 
+### Monitoring (`/api/monitoring/`) — Admin only
+| Method | URL | Description |
+|--------|-----|-------------|
+| GET | `/api/monitoring/metrics/` | List recorded metrics; `?metric_type=&hours=24` |
+| GET/POST | `/api/monitoring/alert-rules/` | List / create alert rules |
+| GET/PATCH/DELETE | `/api/monitoring/alert-rules/<pk>/` | Rule detail |
+| GET | `/api/monitoring/alerts/` | List alert instances; `?status=&severity=&hours=72` |
+| GET/PATCH | `/api/monitoring/alerts/<pk>/` | Alert detail / acknowledge / resolve |
+| GET | `/api/monitoring/dashboard/` | Health status, active alert counts, latest metrics, 24h trends |
+
+**Alert instance status machine:**
+```
+triggered → acknowledged  (admin)
+triggered → resolved      (admin)
+acknowledged → resolved   (admin)
+resolved → (terminal)
+```
+Auto-resolved by `check_alert_rules` when metric returns to normal range.
+
+**Metric types:** `overdue_invoice_count`, `monthly_revenue`, `occupancy_rate`, `open_maintenance_count`, `open_dispute_count`, `pending_application_count`, `payment_success_rate`
+
+**Seeded alert rules:** high overdue invoices (warning ≥10, critical ≥50), low occupancy (warning ≤70%), high open maintenance (warning ≥20), high open disputes (warning ≥5), low payment success rate (critical ≤80%)
+
 ### Docs
 | GET | `/api/docs/` | Swagger UI |
 | GET | `/api/redoc/` | ReDoc |
@@ -450,6 +483,14 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - `RoleChangeLog` lives in `dashboard/models.py`; fields: user, changed_by, old_role, new_role, changed_at, reason (optional text)
 - Content moderation DELETE requires `?type=property|tenant` query param to resolve which review model to delete from
 - Role-specific dashboards enforce access at the top of the view (403 if wrong role) — no shared permission helper
+
+### Monitoring
+- `record_metrics` must run on a cron schedule (e.g. every 15 min) to populate `SystemMetric` — without data, alert rules have nothing to evaluate
+- `check_alert_rules` should run after each `record_metrics` run — it reads the latest metric per type, evaluates all enabled rules, and creates/auto-resolves `AlertInstance` records
+- Alerts auto-resolve when the metric returns to the normal range — no manual action required for transient spikes
+- Admin users are notified via `create_notification` when an alert fires; delivery respects their `NotificationPreference`
+- All monitoring endpoints are admin-only (`is_staff=True`); non-admin users get 403
+- New metric types require adding to `METRIC_TYPES` in `monitoring/models.py` and updating `record_metrics` command logic
 
 ### General
 - Read a file before editing it
