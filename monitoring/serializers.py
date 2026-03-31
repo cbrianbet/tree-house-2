@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import SystemMetric, AlertRule, AlertInstance
+from .models import SystemMetric, AlertRule, AlertInstance, ImpersonationLog
 
 
 class SystemMetricSerializer(serializers.ModelSerializer):
@@ -40,4 +40,23 @@ class AlertInstanceSerializer(serializers.ModelSerializer):
     def get_acknowledged_by_username(self, obj):
         if obj.acknowledged_by:
             return obj.acknowledged_by.username
+        return None
+
+
+class ImpersonationLogSerializer(serializers.ModelSerializer):
+    admin_username = serializers.CharField(source='admin.username', read_only=True)
+    target_username = serializers.CharField(source='target_user.username', read_only=True)
+    target_role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ImpersonationLog
+        fields = [
+            'id', 'admin', 'admin_username',
+            'target_user', 'target_username', 'target_role',
+            'path', 'method', 'timestamp',
+        ]
+
+    def get_target_role(self, obj):
+        if obj.target_user.role:
+            return obj.target_user.role.name
         return None

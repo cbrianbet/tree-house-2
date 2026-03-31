@@ -8,4 +8,5 @@ urlpatterns = [
     path('alerts/', views.alert_list, name='monitoring-alert-list'),
     path('alerts/<int:pk>/', views.alert_detail, name='monitoring-alert-detail'),
     path('dashboard/', views.monitoring_dashboard, name='monitoring-dashboard'),
+    path('impersonation-logs/', views.impersonation_log_list, name='monitoring-impersonation-logs'),
 ]
