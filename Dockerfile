@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.14
 
 WORKDIR /app
 
@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     gcc \
+    libc6-dev \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
