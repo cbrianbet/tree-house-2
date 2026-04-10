@@ -1,6 +1,6 @@
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
@@ -364,21 +364,22 @@ def note_list_create(request, pk):
 @extend_schema(methods=['GET'], summary="List images for a request")
 @extend_schema(methods=['POST'], summary="Upload an image for a request")
 @api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def image_list_create(request, pk):
     try:
         req = MaintenanceRequest.objects.select_related('property').get(pk=pk)
     except MaintenanceRequest.DoesNotExist:
         return Response({'detail': 'Request not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-    if not can_view_request(request.user, req):
-        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
     if request.method == 'GET':
         images = req.images.all()
         return Response(MaintenanceImageSerializer(images, many=True).data)
 
     elif request.method == 'POST':
+        if not request.user.is_authenticated:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        if not can_view_request(request.user, req):
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         serializer = MaintenanceImageSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(request=req, uploaded_by=request.user)
