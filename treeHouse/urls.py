@@ -17,8 +17,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path, re_path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+from django.conf import settings
+from django.conf.urls.static import static
 
 urlpatterns = [
+	
     path('admin/', admin.site.urls),
     path('api/auth/', include('authentication.urls')),
 
@@ -36,3 +39,5 @@ urlpatterns = [
     path('api/dashboard/', include('dashboard.urls')),
     path('api/monitoring/', include('monitoring.urls')),
 ]
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
