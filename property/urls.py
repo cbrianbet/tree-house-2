@@ -9,6 +9,7 @@ urlpatterns = [
     path('properties/<int:property_id>/agents/<int:agent_id>/', views.property_agent_detail, name='property-agent-detail'),
     path('units/<int:pk>/', views.unit_detail, name='unit-detail'),
     path('units/<int:unit_id>/images/', views.unit_image_list_create, name='unit-image-list-create'),
+    path('units/<int:unit_id>/images/<int:image_id>/', views.unit_image_detail, name='unit-image-detail'),
     path('units/<int:unit_id>/lease/', views.lease_list_create, name='lease-list-create'),
     path('units/public/', views.public_units, name='public-units'),
     # Tenant applications
@@ -18,6 +19,7 @@ urlpatterns = [
     path('dashboard/', views.landlord_dashboard, name='landlord-dashboard'),
     # Lease documents
     path('leases/<int:lease_id>/documents/', views.lease_document_list_create, name='lease-document-list-create'),
+    path('leases/<int:lease_id>/documents/<int:doc_id>/', views.lease_document_detail, name='lease-document-detail'),
     path('leases/<int:lease_id>/documents/<int:doc_id>/sign/', views.lease_document_sign, name='lease-document-sign'),
     # Property reviews
     path('properties/<int:property_id>/reviews/', views.property_review_list_create, name='property-review-list-create'),

@@ -29,6 +29,7 @@ Content-Type: `application/json`
 | Create / update unit | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
 | Delete unit | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
 | Upload unit images | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
+| Delete unit images | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
 | Appoint / remove agent | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
 | Portfolio dashboard | ✗ | All | Own | ✗ | ✗ | ✗ | ✗ |
 | **— APPLICATIONS —** | | | | | | | |
@@ -39,6 +40,7 @@ Content-Type: `application/json`
 | **— LEASES & DOCUMENTS —** | | | | | | | |
 | View / create lease | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
 | List / upload lease documents | ✗ | ✓ | Own | Assigned | On lease | ✗ | ✗ |
+| Delete lease documents | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
 | Sign lease document | ✗ | ✗ | ✗ | ✗ | On lease | ✗ | ✗ |
 | **— BILLING —** | | | | | | | |
 | Configure billing | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
@@ -1154,7 +1156,30 @@ Accepting a bid automatically:
 
 ---
 
-### Images
+### Images on Unit
+`GET /api/property/units/<unit_id>/images/` — list all images for a unit
+`POST /api/property/units/<unit_id>/images/` — upload a new image (Admin / Owner / Agent)
+```json
+// POST Request — multipart/form-data
+{ "image": <binary_file> }
+
+// Response 201
+{
+  "id": 1,
+  "property": 1,
+  "image": "/media/property_images/unit_a1.jpg",
+  "uploaded_at": "2024-03-01T09:05:00Z"
+}
+```
+
+`GET /api/property/units/<unit_id>/images/<image_id>/` — get image detail
+`DELETE /api/property/units/<unit_id>/images/<image_id>/` — delete image (Admin / Owner / Agent) → `204 No Content`
+
+> When deleting an image, only the Admin, property owner, or assigned agent can proceed. Similar filenames automatically receive a suffix to prevent overwrites (e.g., `photo.jpg` → `photo_1.jpg`).
+
+---
+
+### Images on Maintenance Request
 `GET /api/maintenance/requests/<pk>/images/`
 `POST /api/maintenance/requests/<pk>/images/` — `multipart/form-data`
 
@@ -1209,6 +1234,29 @@ Attached to a specific lease. Stores a URL to the document (no file upload — s
 }
 ```
 Document type choices: `lease_agreement`, `addendum`, `notice`, `inspection_report`, `other`
+
+### Get a Document (Owner / Agent / Tenant on that lease)
+`GET /api/property/leases/<lease_id>/documents/<doc_id>/`
+
+```json
+// Response 200
+{
+  "id": 1,
+  "lease": 2,
+  "document_type": "lease_agreement",
+  "title": "Lease Agreement — Unit A1 2024",
+  "file_url": "https://storage.example.com/docs/lease-a1-2024.pdf",
+  "uploaded_by": 3,
+  "signed_by": 5,
+  "signed_at": "2024-02-01T10:00:00Z",
+  "created_at": "2024-02-01T08:00:00Z"
+}
+```
+
+### Delete a Document (Owner / Agent only)
+`DELETE /api/property/leases/<lease_id>/documents/<doc_id>/` → `204 No Content`
+
+Only the property owner or assigned agent can delete documents. Tenants cannot delete.
 
 ### Sign a Document (Tenant on that lease)
 `POST /api/property/leases/<lease_id>/documents/<doc_id>/sign/`
