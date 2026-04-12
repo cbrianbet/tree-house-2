@@ -233,6 +233,32 @@ def unit_image_list_create(request, unit_id):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(methods=['GET'], summary="Get an image")
+@extend_schema(methods=['DELETE'], summary="Delete an image")
+@api_view(['GET', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def unit_image_detail(request, unit_id, image_id):
+    try:
+        unit = Unit.objects.get(pk=unit_id)
+    except Unit.DoesNotExist:
+        return Response({'detail': 'Unit not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        image = PropertyImage.objects.get(pk=image_id, property=unit.property)
+    except PropertyImage.DoesNotExist:
+        return Response({'detail': 'Image not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        serializer = PropertyImageSerializer(image)
+        return Response(serializer.data)
+
+    elif request.method == 'DELETE':
+        if not (is_admin(request.user) or unit.property.owner == request.user or is_agent_for(request.user, unit.property)):
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        image.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @extend_schema(methods=['GET'], summary="Get lease for a unit")
 @extend_schema(
     methods=['POST'],
@@ -752,6 +778,40 @@ def lease_document_list_create(request, lease_id):
             serializer.save(lease=lease, uploaded_by=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(methods=['GET'], summary="Get a lease document")
+@extend_schema(methods=['DELETE'], summary="Delete a lease document")
+@api_view(['GET', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def lease_document_detail(request, lease_id, doc_id):
+    try:
+        lease = Lease.objects.select_related('unit__property', 'tenant').get(pk=lease_id)
+    except Lease.DoesNotExist:
+        return Response({'detail': 'Lease not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = LeaseDocument.objects.select_related('uploaded_by').get(pk=doc_id, lease=lease)
+    except LeaseDocument.DoesNotExist:
+        return Response({'detail': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    prop = lease.unit.property
+    is_owner = prop.owner == request.user
+    is_assigned_agent = is_agent_for(request.user, prop)
+    is_lease_tenant = lease.tenant == request.user
+
+    if not (is_admin(request.user) or is_owner or is_assigned_agent or is_lease_tenant):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        serializer = LeaseDocumentSerializer(doc)
+        return Response(serializer.data)
+
+    elif request.method == 'DELETE':
+        if not (is_admin(request.user) or is_owner or is_assigned_agent):
+            return Response({'detail': 'Only the landlord or assigned agent can delete documents.'}, status=status.HTTP_403_FORBIDDEN)
+        doc.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @extend_schema(
