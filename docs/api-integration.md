@@ -48,6 +48,7 @@ Content-Type: `application/json`
 | **— BILLING —** | | | | | | | |
 | Configure billing | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
 | List / view invoices | ✗ | All | Own | Assigned | Own | ✗ | ✗ |
+| Create invoice (manual) | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
 | Pay invoice (Stripe) | ✗ | ✗ | ✗ | ✗ | Own | ✗ | ✗ |
 | View payments & receipts | ✗ | All | Own | Assigned | Own | ✗ | ✗ |
 | Manage charge types | ✗ | ✓ | Own | View only | ✗ | ✗ | ✗ |
@@ -665,11 +666,67 @@ Scoped by role:
     "rent_amount": "25000.00",
     "late_fee_amount": "0.00",
     "total_amount": "25000.00",
-    "status": "pending"
+    "status": "pending",
+    "amount_paid": "0",
+    "created_at": "2024-02-01T08:00:00Z"
   }
 ]
 ```
 Invoice status values: `pending`, `paid`, `partial`, `overdue`, `cancelled`
+
+---
+
+### Create invoice manually (Owner / Assigned Agent / Admin)
+`POST /api/billing/invoices/`
+
+Use this to issue a rent invoice outside the automatic `process_billing` schedule (e.g. backfill, proration, or an extra period). The property must already have billing configuration (`POST /api/billing/config/<property_id>/`). The lease must be **active**; the billing period must **overlap** the lease dates (`start_date` / optional `end_date`).
+
+**Who can call:** platform admin, the property owner, or an agent appointed to that property. Tenants and other roles get `403`.
+
+**Constraints:**
+- At most one invoice per `(lease, period_start)` — duplicate returns `400`.
+- Omitting `rent_amount` uses the lease’s `rent_amount`; you may override for prorations.
+- New invoices are created with `late_fee_amount = 0`, `status = pending`, `total_amount = rent_amount` (late fees are applied later by `process_billing` when overdue).
+
+```json
+// Request
+{
+  "lease": 2,
+  "period_start": "2024-03-01",
+  "period_end": "2024-03-31",
+  "due_date": "2024-03-06",
+  "rent_amount": "25000.00"
+}
+```
+
+`rent_amount` is optional.
+
+```json
+// Response 201 — same shape as GET list/detail (`amount_paid`, `created_at` included)
+{
+  "id": 15,
+  "lease": 2,
+  "period_start": "2024-03-01",
+  "period_end": "2024-03-31",
+  "due_date": "2024-03-06",
+  "rent_amount": "25000.00",
+  "late_fee_amount": "0.00",
+  "total_amount": "25000.00",
+  "status": "pending",
+  "amount_paid": "0",
+  "created_at": "2024-03-01T08:00:00Z"
+}
+```
+
+**Common errors:**
+
+| Situation | Status |
+|-----------|--------|
+| Not owner / assigned agent / admin | `403` |
+| No billing config on the property | `400` — `No billing config set for this property.` |
+| Duplicate `period_start` for that lease | `400` — `An invoice for this lease and period_start already exists.` |
+| Lease inactive or period outside lease dates | `400` — field errors from validation |
+| `period_end` before `period_start` | `400` |
 
 ---
 

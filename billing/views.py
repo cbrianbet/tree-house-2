@@ -18,7 +18,7 @@ from property.models import Property, Unit, Lease
 from property.views import is_admin, is_landlord, is_agent_for
 from .models import BillingConfig, Invoice, Payment, Receipt, ChargeType, AdditionalIncome, Expense
 from .serializers import (
-    BillingConfigSerializer, InvoiceSerializer,
+    BillingConfigSerializer, InvoiceSerializer, InvoiceCreateSerializer,
     PaymentSerializer, ReceiptSerializer,
     ChargeTypeSerializer, AdditionalIncomeSerializer, ExpenseSerializer,
 )
@@ -76,24 +76,80 @@ def billing_config(request, property_id):
 # ── Invoices ───────────────────────────────────────────────────────────────────
 
 @extend_schema(methods=['GET'], summary="List invoices")
-@api_view(['GET'])
+@extend_schema(
+    methods=['POST'],
+    summary="Create invoice manually",
+    examples=[
+        OpenApiExample(
+            "Create invoice",
+            request_only=True,
+            value={
+                'lease': 1,
+                'period_start': '2026-04-01',
+                'period_end': '2026-04-30',
+                'due_date': '2026-04-05',
+                'rent_amount': '45000.00',
+            },
+        ),
+    ],
+)
+@api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def invoice_list(request):
     user = request.user
-    if is_admin(user):
-        invoices = Invoice.objects.select_related('lease__unit__property').all()
-    elif is_landlord(user):
-        invoices = Invoice.objects.filter(lease__unit__property__owner=user)
-    elif hasattr(user, 'role') and user.role.name == 'Agent':
-        from property.models import PropertyAgent
-        assigned_ids = PropertyAgent.objects.filter(agent=user).values_list('property_id', flat=True)
-        invoices = Invoice.objects.filter(lease__unit__property_id__in=assigned_ids)
-    else:
-        # Tenant sees their own invoices
-        invoices = Invoice.objects.filter(lease__tenant=user)
 
-    serializer = InvoiceSerializer(invoices, many=True)
-    return Response(serializer.data)
+    if request.method == 'GET':
+        if is_admin(user):
+            invoices = Invoice.objects.select_related('lease__unit__property').all()
+        elif is_landlord(user):
+            invoices = Invoice.objects.filter(lease__unit__property__owner=user)
+        elif hasattr(user, 'role') and user.role.name == 'Agent':
+            from property.models import PropertyAgent
+            assigned_ids = PropertyAgent.objects.filter(agent=user).values_list('property_id', flat=True)
+            invoices = Invoice.objects.filter(lease__unit__property_id__in=assigned_ids)
+        else:
+            # Tenant sees their own invoices
+            invoices = Invoice.objects.filter(lease__tenant=user)
+
+        serializer = InvoiceSerializer(invoices, many=True)
+        return Response(serializer.data)
+
+    serializer = InvoiceCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    lease = serializer.validated_data['lease']
+    prop = lease.unit.property
+    can_create = is_admin(user) or prop.owner == user or is_agent_for(user, prop)
+    if not can_create:
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        prop.billing_config
+    except BillingConfig.DoesNotExist:
+        return Response(
+            {'detail': 'No billing config set for this property.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        invoice = Invoice.objects.create(
+            lease=lease,
+            period_start=serializer.validated_data['period_start'],
+            period_end=serializer.validated_data['period_end'],
+            due_date=serializer.validated_data['due_date'],
+            rent_amount=serializer.validated_data['rent_amount'],
+            late_fee_amount=Decimal('0'),
+            total_amount=serializer.validated_data['rent_amount'],
+            status='pending',
+        )
+    except IntegrityError:
+        return Response(
+            {'detail': 'An invoice for this lease and period_start already exists.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
 
 @extend_schema(methods=['GET'], summary="Get invoice detail")
