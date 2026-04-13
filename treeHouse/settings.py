@@ -61,6 +61,8 @@ INSTALLED_APPS = [
 
     'corsheaders',
 
+    'anymail',
+
     'billing',
     'maintenance',
     'notifications',
@@ -171,7 +173,21 @@ STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'whsec_placeholder')
 
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@treehouse.com')
 
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# Email: Mailgun (production) when MAILGUN_API_KEY + MAILGUN_SENDER_DOMAIN are set; else console (dev).
+MAILGUN_API_KEY = os.getenv('MAILGUN_API_KEY', '').strip()
+MAILGUN_SENDER_DOMAIN = os.getenv('MAILGUN_SENDER_DOMAIN', '').strip()
+if MAILGUN_API_KEY and MAILGUN_SENDER_DOMAIN:
+    EMAIL_BACKEND = 'anymail.backends.mailgun.EmailBackend'
+    ANYMAIL = {
+        'MAILGUN_API_KEY': MAILGUN_API_KEY,
+        'MAILGUN_SENDER_DOMAIN': MAILGUN_SENDER_DOMAIN,
+    }
+    # Use EU region if your Mailgun account is in the EU (https://documentation.mailgun.com/docs/mailgun/api-intro/#base-url)
+    if os.getenv('MAILGUN_EU', '').strip().lower() in ('1', 'true', 'yes'):
+        ANYMAIL['MAILGUN_API_URL'] = 'https://api.eu.mailgun.net/v3'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
 EMAIL_CONFIRM_REDIRECT_BASE_URL = os.getenv("EMAIL_CONFIRM_REDIRECT_BASE_URL", "http://localhost:8000/email-confirm/")
 PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL = os.getenv("PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL", "http://localhost:8000/password-reset-confirm/")
 TENANT_INVITE_REDIRECT_BASE_URL = os.getenv(

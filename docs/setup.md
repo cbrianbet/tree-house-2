@@ -60,6 +60,11 @@ PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL=http://localhost:8000/password-reset-co
 TENANT_INVITE_REDIRECT_BASE_URL=http://localhost:3000/tenant-invite/
 DEFAULT_FROM_EMAIL=noreply@yourdomain.com
 
+# Mailgun (optional — omit both to keep console email in dev)
+MAILGUN_API_KEY=
+MAILGUN_SENDER_DOMAIN=mg.yourdomain.com
+# MAILGUN_EU=true
+
 # Stripe (use placeholders for local dev — real keys needed for payment testing)
 STRIPE_SECRET_KEY=sk_test_placeholder
 STRIPE_WEBHOOK_SECRET=whsec_placeholder

@@ -30,11 +30,16 @@ EMAIL_CONFIRM_REDIRECT_BASE_URL=
 PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL=
 TENANT_INVITE_REDIRECT_BASE_URL=
 DEFAULT_FROM_EMAIL=
+MAILGUN_API_KEY=
+MAILGUN_SENDER_DOMAIN=
+# MAILGUN_EU=true
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 ```
 
 Stripe keys use `sk_test_placeholder` / `whsec_placeholder` as defaults until real keys are added.
+
+**Email:** With both `MAILGUN_API_KEY` and `MAILGUN_SENDER_DOMAIN` set, Django sends via [Mailgun](https://www.mailgun.com/) (`django-anymail`). Otherwise email uses the console backend in dev. Set `DEFAULT_FROM_EMAIL` to an address on your verified Mailgun domain (e.g. `noreply@mg.example.com`). For Mailgun EU hosting, set `MAILGUN_EU=true`.
 
 DB connects via Supabase transaction pooler (`aws-1-eu-west-1.pooler.supabase.com:5432`). If connection fails, check that the Supabase project is not paused (free tier pauses after inactivity).
 
