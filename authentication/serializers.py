@@ -11,6 +11,11 @@ class CustomRegisterSerializer(RegisterSerializer):
 	first_name = serializers.CharField(required=False, allow_blank=True)
 	last_name = serializers.CharField(required=False, allow_blank=True)
 
+	def validate_role(self, value):
+		if value and value.name == Role.ADMIN:
+			raise serializers.ValidationError("Admin role cannot be self-assigned.")
+		return value
+
 	def get_cleaned_data(self):
 		data = super().get_cleaned_data()
 		data['phone'] = self.validated_data.get('phone', '')

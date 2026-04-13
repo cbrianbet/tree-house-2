@@ -21,6 +21,12 @@ class CustomUser(AbstractUser):
     phone = models.CharField(max_length=20, blank=True)
     role = models.ForeignKey(Role, on_delete=models.CASCADE, null=False)
 
+    def save(self, *args, **kwargs):
+        # Keep admin role and Django staff flag in sync for permission checks.
+        if self.role_id and Role.objects.filter(pk=self.role_id, name=Role.ADMIN).exists():
+            self.is_staff = True
+        super().save(*args, **kwargs)
+
 
 class TenantProfile(models.Model):
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='tenant_profile')

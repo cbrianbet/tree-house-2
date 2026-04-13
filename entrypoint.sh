@@ -7,8 +7,14 @@ until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER"; do
 done
 echo "Postgres is ready."
 
+echo "Pending migration plan:"
+python manage.py showmigrations --plan
+
 echo "Running migrations..."
 python manage.py migrate --noinput
+
+echo "Applied migration state:"
+python manage.py showmigrations
 
 echo "Starting server..."
 exec gunicorn treeHouse.wsgi:application \
