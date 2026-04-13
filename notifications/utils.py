@@ -3,7 +3,7 @@ def create_notification(user, notification_type, title, body, action_url=''):
     Creates an in-app Notification record.
     Also sends an email if the user's NotificationPreference allows it.
 
-    notification_type must be one of: message, maintenance, payment, lease, dispute, application
+    notification_type must be one of the Notification.NOTIFICATION_TYPES values (e.g. message, maintenance, payment, payment_reminder, lease, dispute, application, …).
     """
     from .models import Notification
     notification = Notification.objects.create(
@@ -37,6 +37,7 @@ def _maybe_send_email(user, notification_type, title, body):
         'message': True,  # always send message notifications if email_notifications is on
         'maintenance': prefs.maintenance_updates,
         'payment': prefs.payment_received,
+        'payment_reminder': prefs.payment_due_reminder,
         'lease': prefs.lease_expiry_notice,
         'dispute': True,  # always send dispute notifications
         'application': prefs.application_status_change,

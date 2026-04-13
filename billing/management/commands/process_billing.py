@@ -3,12 +3,10 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
-from django.core.mail import send_mail
-from django.conf import settings
 from django.utils import timezone
 
 from property.models import Lease
-from billing.models import BillingConfig, Invoice, ReminderLog
+from billing.models import BillingConfig, Invoice, ReminderLog, PropertyBillingNotificationSettings
 
 
 class Command(BaseCommand):
@@ -34,13 +32,16 @@ class Command(BaseCommand):
                 self.stdout.write(f'  No billing config for property "{lease.unit.property.name}" — skipping')
                 continue
 
-            due_day = self._clamp_due_day(config.rent_due_day, today.year, today.month)
-            if today.day != due_day:
+            y, m = today.year, today.month
+            clamped_due = self._clamp_due_day(config.rent_due_day, y, m)
+            gen_day = max(1, clamped_due - config.invoice_lead_days)
+            if today.day != gen_day:
                 continue
 
             period_start = today.replace(day=1)
             period_end = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-            due_date = today + timedelta(days=config.grace_period_days)
+            anchor = date(y, m, clamped_due)
+            due_date = anchor + timedelta(days=config.grace_period_days)
 
             _, created = Invoice.objects.get_or_create(
                 lease=lease,
@@ -73,11 +74,18 @@ class Command(BaseCommand):
             except BillingConfig.DoesNotExist:
                 continue
 
-            late_fee = (invoice.rent_amount * config.late_fee_percentage / Decimal('100')).quantize(Decimal('0.01'))
+            if config.late_fee_mode == BillingConfig.LATE_FEE_MODE_FIXED:
+                late_fee = (config.late_fee_fixed_amount or Decimal('0')).quantize(Decimal('0.01'))
+            else:
+                late_fee = (
+                    invoice.rent_amount * config.late_fee_percentage / Decimal('100')
+                ).quantize(Decimal('0.01'))
 
-            if config.late_fee_max_percentage:
-                max_fee = (invoice.rent_amount * config.late_fee_max_percentage / Decimal('100')).quantize(Decimal('0.01'))
-                late_fee = min(late_fee, max_fee)
+                if config.late_fee_max_percentage:
+                    max_fee = (
+                        invoice.rent_amount * config.late_fee_max_percentage / Decimal('100')
+                    ).quantize(Decimal('0.01'))
+                    late_fee = min(late_fee, max_fee)
 
             invoice.late_fee_amount = late_fee
             invoice.total_amount = invoice.rent_amount + late_fee
@@ -88,40 +96,70 @@ class Command(BaseCommand):
                 f'  Late fee applied: {invoice.lease.tenant.username} — Invoice {invoice.id} (+{late_fee})'
             ))
 
-    # ── Email Reminders ─────────────────────────────────────────────────────────
+    # ── Reminders ───────────────────────────────────────────────────────────────
 
     def _send_reminders(self, today):
         self._send_pre_due_reminders(today)
         self._send_due_date_reminders(today)
-        self._send_overdue_reminders()
+        self._send_overdue_reminders(today)
+
+    def _pre_due_offset_days(self, prop):
+        """Legacy: no settings row → 3. Row exists with null remind_before_due_days → disabled."""
+        try:
+            s = prop.billing_notification_settings
+        except PropertyBillingNotificationSettings.DoesNotExist:
+            return 3
+        if s.remind_before_due_days is None:
+            return None
+        return s.remind_before_due_days
+
+    def _overdue_reminder_delay_days(self, prop):
+        """Days after invoice due_date before sending overdue reminder. Null → 0."""
+        try:
+            s = prop.billing_notification_settings
+        except PropertyBillingNotificationSettings.DoesNotExist:
+            return 0
+        if s.remind_after_overdue_days is None:
+            return 0
+        return s.remind_after_overdue_days
 
     def _send_pre_due_reminders(self, today):
-        target_due = today + timedelta(days=3)
-        invoices = Invoice.objects.filter(
-            due_date=target_due,
-            status__in=['pending', 'partial'],
-        ).exclude(reminders__reminder_type='pre_due').select_related('lease__tenant')
+        from notifications.utils import create_notification
 
-        for invoice in invoices:
+        candidates = Invoice.objects.filter(
+            status__in=['pending', 'partial'],
+        ).exclude(reminders__reminder_type='pre_due').select_related(
+            'lease__tenant', 'lease__unit__property',
+        )
+
+        for invoice in candidates:
+            prop = invoice.lease.unit.property
+            n = self._pre_due_offset_days(prop)
+            if n is None:
+                continue
+            if invoice.due_date != today + timedelta(days=n):
+                continue
+
             tenant = invoice.lease.tenant
-            send_mail(
-                subject='Rent due in 3 days',
-                message=(
-                    f'Hi {tenant.first_name or tenant.username},\n\n'
-                    f'This is a reminder that your rent of KES {invoice.total_amount} '
-                    f'is due on {invoice.due_date}.\n\n'
-                    f'Invoice #{invoice.id} | Period: {invoice.period_start} – {invoice.period_end}\n\n'
-                    f'Please ensure payment is made on time to avoid late fees.\n\n'
-                    f'Tree House'
-                ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[tenant.email],
-                fail_silently=True,
+            title = f'Rent due in {n} day{"s" if n != 1 else ""}'
+            body = (
+                f'Hi {tenant.first_name or tenant.username},\n\n'
+                f'This is a reminder that your rent of KES {invoice.total_amount} '
+                f'is due on {invoice.due_date}.\n\n'
+                f'Invoice #{invoice.id} | Period: {invoice.period_start} – {invoice.period_end}\n\n'
+                f'Please ensure payment is made on time to avoid late fees.\n\n'
+                f'Tree House'
+            )
+            create_notification(
+                tenant, 'payment_reminder', title, body,
+                action_url='',
             )
             ReminderLog.objects.create(invoice=invoice, reminder_type='pre_due')
             self.stdout.write(f'  Pre-due reminder sent to {tenant.email}')
 
     def _send_due_date_reminders(self, today):
+        from notifications.utils import create_notification
+
         invoices = Invoice.objects.filter(
             due_date=today,
             status__in=['pending', 'partial'],
@@ -129,44 +167,46 @@ class Command(BaseCommand):
 
         for invoice in invoices:
             tenant = invoice.lease.tenant
-            send_mail(
-                subject='Rent is due today',
-                message=(
-                    f'Hi {tenant.first_name or tenant.username},\n\n'
-                    f'Your rent of KES {invoice.total_amount} is due today ({invoice.due_date}).\n\n'
-                    f'Invoice #{invoice.id} | Period: {invoice.period_start} – {invoice.period_end}\n\n'
-                    f'Please make payment today to avoid late fees.\n\n'
-                    f'Tree House'
-                ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[tenant.email],
-                fail_silently=True,
+            title = 'Rent is due today'
+            body = (
+                f'Hi {tenant.first_name or tenant.username},\n\n'
+                f'Your rent of KES {invoice.total_amount} is due today ({invoice.due_date}).\n\n'
+                f'Invoice #{invoice.id} | Period: {invoice.period_start} – {invoice.period_end}\n\n'
+                f'Please make payment today to avoid late fees.\n\n'
+                f'Tree House'
             )
+            create_notification(tenant, 'payment_reminder', title, body, action_url='')
             ReminderLog.objects.create(invoice=invoice, reminder_type='due_date')
             self.stdout.write(f'  Due-date reminder sent to {tenant.email}')
 
-    def _send_overdue_reminders(self):
+    def _send_overdue_reminders(self, today):
+        from notifications.utils import create_notification
+
         invoices = Invoice.objects.filter(
             status='overdue',
-        ).exclude(reminders__reminder_type='overdue').select_related('lease__tenant')
+        ).exclude(reminders__reminder_type='overdue').select_related(
+            'lease__tenant', 'lease__unit__property',
+        )
 
         for invoice in invoices:
+            prop = invoice.lease.unit.property
+            delay = self._overdue_reminder_delay_days(prop)
+            threshold = invoice.due_date + timedelta(days=delay)
+            if today < threshold:
+                continue
+
             tenant = invoice.lease.tenant
-            send_mail(
-                subject='Rent overdue — late fee applied',
-                message=(
-                    f'Hi {tenant.first_name or tenant.username},\n\n'
-                    f'Your rent for the period {invoice.period_start} – {invoice.period_end} is overdue.\n\n'
-                    f'Rent:      KES {invoice.rent_amount}\n'
-                    f'Late fee:  KES {invoice.late_fee_amount}\n'
-                    f'Total due: KES {invoice.total_amount}\n\n'
-                    f'Please make payment immediately to avoid further charges.\n\n'
-                    f'Tree House'
-                ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[tenant.email],
-                fail_silently=True,
+            title = 'Rent overdue — late fee applied'
+            body = (
+                f'Hi {tenant.first_name or tenant.username},\n\n'
+                f'Your rent for the period {invoice.period_start} – {invoice.period_end} is overdue.\n\n'
+                f'Rent:      KES {invoice.rent_amount}\n'
+                f'Late fee:  KES {invoice.late_fee_amount}\n'
+                f'Total due: KES {invoice.total_amount}\n\n'
+                f'Please make payment immediately to avoid further charges.\n\n'
+                f'Tree House'
             )
+            create_notification(tenant, 'payment_reminder', title, body, action_url='')
             ReminderLog.objects.create(invoice=invoice, reminder_type='overdue')
             self.stdout.write(self.style.ERROR(f'  Overdue reminder sent to {tenant.email}'))
 
