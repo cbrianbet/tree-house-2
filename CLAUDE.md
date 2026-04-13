@@ -227,7 +227,7 @@ Seeded via data migrations. Roles are:
 | Method | URL | Who |
 |--------|-----|-----|
 | GET/POST | `/api/billing/config/<property_id>/` | Owner/Admin |
-| GET | `/api/billing/invoices/` | Admin=all, Landlord=own properties, Agent=assigned, Tenant=own |
+| GET/POST | `/api/billing/invoices/` | GET: Admin=all, Landlord=own properties, Agent=assigned, Tenant=own — POST: Admin / property owner / assigned agent (requires billing config on property; body: `lease`, `period_start`, `period_end`, `due_date`, optional `rent_amount`) |
 | GET | `/api/billing/invoices/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/invoices/<pk>/pay/` | Tenant only |
 | GET | `/api/billing/invoices/<pk>/payments/` | Owner/Agent/Tenant |

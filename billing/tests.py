@@ -1,3 +1,4 @@
+import calendar
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
@@ -163,6 +164,138 @@ class InvoiceTests(APITestCase):
         self.auth(self.other_token)
         response = self.client.get(reverse('invoice-detail', args=[self.invoice.id]))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class InvoiceCreateTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord_ic', 'Landlord')
+        self.other_landlord, self.other_token = make_user('landlord_ic2', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant_ic', 'Tenant')
+        self.agent, self.agent_token = make_user('agent_ic', 'Agent')
+        self.admin, self.admin_token = make_user('admin_ic', 'Admin', is_staff=True)
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+        BillingConfig.objects.create(
+            property=self.prop,
+            rent_due_day=5,
+            grace_period_days=3,
+            late_fee_percentage='5.00',
+            updated_by=self.landlord,
+        )
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def _next_month_period(self):
+        today = date.today()
+        if today.month == 12:
+            y, m = today.year + 1, 1
+        else:
+            y, m = today.year, today.month + 1
+        ps = date(y, m, 1)
+        pe = date(y, m, calendar.monthrange(y, m)[1])
+        return ps, pe
+
+    def _create_payload(self, lease_id=None, **overrides):
+        ps, pe = self._next_month_period()
+        payload = {
+            'lease': lease_id if lease_id is not None else self.lease.id,
+            'period_start': ps.isoformat(),
+            'period_end': pe.isoformat(),
+            'due_date': ps.isoformat(),
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_landlord_can_create_invoice(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload())
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Decimal(response.data['rent_amount']), Decimal('45000'))
+        self.assertEqual(Decimal(response.data['late_fee_amount']), Decimal('0'))
+        self.assertEqual(Decimal(response.data['total_amount']), Decimal('45000'))
+        self.assertEqual(response.data['status'], 'pending')
+
+    def test_rent_amount_override(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-list'),
+            self._create_payload(rent_amount='40000.00'),
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Decimal(response.data['rent_amount']), Decimal('40000'))
+        self.assertEqual(Decimal(response.data['total_amount']), Decimal('40000'))
+
+    def test_admin_can_create_invoice(self):
+        self.auth(self.admin_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload())
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_assigned_agent_can_create_invoice(self):
+        PropertyAgent.objects.create(
+            property=self.prop, agent=self.agent, appointed_by=self.landlord
+        )
+        self.auth(self.agent_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload())
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_unassigned_agent_forbidden(self):
+        self.auth(self.agent_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload())
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_landlord_forbidden(self):
+        self.auth(self.other_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload())
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_forbidden(self):
+        self.auth(self.tenant_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload())
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_duplicate_lease_period_returns_400(self):
+        self.auth(self.landlord_token)
+        payload = self._create_payload()
+        r1 = self.client.post(reverse('invoice-list'), payload)
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
+        r2 = self.client.post(reverse('invoice-list'), payload)
+        self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_billing_config_returns_400(self):
+        prop2 = make_property(self.landlord)
+        unit2 = make_unit(prop2, self.landlord)
+        lease2 = make_lease(unit2, self.tenant)
+        self.auth(self.landlord_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload(lease_id=lease2.id))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_inactive_lease_returns_400(self):
+        self.lease.is_active = False
+        self.lease.save()
+        self.auth(self.landlord_token)
+        response = self.client.post(reverse('invoice-list'), self._create_payload())
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_period_outside_lease_returns_400(self):
+        end = date.today()
+        self.lease.end_date = end
+        self.lease.save()
+        self.auth(self.landlord_token)
+        future_start = end + timedelta(days=40)
+        future_end = future_start + timedelta(days=27)
+        response = self.client.post(
+            reverse('invoice-list'),
+            {
+                'lease': self.lease.id,
+                'period_start': future_start.isoformat(),
+                'period_end': future_end.isoformat(),
+                'due_date': future_start.isoformat(),
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class PaymentTests(APITestCase):
