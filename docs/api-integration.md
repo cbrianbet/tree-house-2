@@ -14,6 +14,7 @@ Content-Type: `application/json`
 |--------|:------:|:-----:|:--------:|:-----:|:------:|:-------:|:-------------:|
 | **— ACCOUNT —** | | | | | | |
 | Register / Login / Logout | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Accept tenant invitation (no auth) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | View & update own account | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | View & update own role profile | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Change password | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -37,6 +38,8 @@ Content-Type: `application/json`
 | List applications | ✗ | All | Own units | ✗ | Own | ✗ | ✗ |
 | Approve / reject application | ✗ | ✓ | Own units | ✗ | ✗ | ✗ | ✗ |
 | Withdraw application | ✗ | ✗ | ✗ | ✗ | Own | ✗ | ✗ |
+| List / create tenant invitations (per unit) | ✗ | All | Own units | Assigned | ✗ | ✗ | ✗ |
+| Resend tenant invitation | ✗ | All | Own units | Assigned | ✗ | ✗ | ✗ |
 | **— LEASES & DOCUMENTS —** | | | | | | | |
 | View / create lease | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
 | List / upload lease documents | ✗ | ✓ | Own | Assigned | On lease | ✗ | ✗ |
@@ -157,6 +160,31 @@ Content-Type: `application/json`
 Store the token and include it on every subsequent request:
 ```
 Authorization: Token abc123tokenhere
+```
+
+---
+
+### Accept tenant invitation
+`POST /api/auth/tenant-invite/accept/` — **no** `Authorization` header. Use the `token` value from the invite email (query string on the frontend URL is for UX only; the API expects `token` in the JSON body).
+
+```json
+// Request
+{
+  "token": "<url-safe-token-from-email>",
+  "password": "strongpass123",
+  "first_name": "Jane",
+  "last_name": "Doe",
+  "phone": "+254712345678",
+  "national_id": "",
+  "emergency_contact_name": "",
+  "emergency_contact_phone": ""
+}
+
+// Response 201
+{
+  "key": "abc123tokenhere",
+  "user": { "pk": 1, "username": "jane@example.com", "email": "jane@example.com", "role": 2, "...": "..." }
+}
 ```
 
 ---

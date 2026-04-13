@@ -1,12 +1,14 @@
 from datetime import date, timedelta
 
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework.authtoken.models import Token
 from rest_framework import status
 from django.contrib.auth import get_user_model
 from authentication.models import Role
-from .models import Property, Unit, PropertyAgent, Lease, TenantApplication, LeaseDocument, PropertyReview, TenantReview
+from .models import Property, Unit, PropertyAgent, Lease, TenantApplication, LeaseDocument, PropertyReview, TenantReview, TenantInvitation
+from .tenant_invite import hash_invite_token
 
 User = get_user_model()
 
@@ -914,3 +916,214 @@ class SavedSearchTests(APITestCase):
             format='json',
         )
         self.assertFalse(Notification.objects.filter(user=self.tenant, notification_type='new_listing').exists())
+
+
+class TenantInvitationTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('inv_ll', 'Landlord')
+        self.landlord.email = 'landlord_inv@example.com'
+        self.landlord.save()
+        self.agent, self.agent_token = make_user('inv_ag', 'Agent')
+        self.tenant, self.tenant_token = make_user('inv_tn', 'Tenant')
+        self.tenant.email = 'existing_tenant@example.com'
+        self.tenant.save()
+        self.other, self.other_token = make_user('inv_oth', 'Landlord')
+        self.other.email = 'other_ll@example.com'
+        self.other.save()
+
+        self.property = Property.objects.create(
+            name='Inv Prop',
+            property_type='apartment',
+            owner=self.landlord,
+            created_by=self.landlord,
+        )
+        self.unit = Unit.objects.create(
+            property=self.property,
+            name='U1',
+            price='30000',
+            created_by=self.landlord,
+        )
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def invite_payload(self, email='brandnew@example.com'):
+        return {
+            'email': email,
+            'start_date': str(date.today()),
+            'rent_amount': '25000.00',
+            'first_name': 'New',
+            'last_name': 'Person',
+        }
+
+    def test_landlord_create_invite_201_and_hashes_token(self):
+        self.auth(self.landlord_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertIn('invite_token', r.data)
+        inv = TenantInvitation.objects.get(pk=r.data['id'])
+        self.assertEqual(inv.token_hash, hash_invite_token(r.data['invite_token']))
+        self.assertEqual(inv.status, 'pending')
+
+    def test_list_invitations(self):
+        self.auth(self.landlord_token)
+        self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(),
+            format='json',
+        )
+        r = self.client.get(reverse('unit-tenant-invitation-list', args=[self.unit.id]))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(r.data), 1)
+
+    def test_existing_tenant_email_creates_lease_without_invite_row(self):
+        self.auth(self.landlord_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(email='existing_tenant@example.com'),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(r.data.get('lease_created'))
+        self.assertFalse(TenantInvitation.objects.filter(email__iexact='existing_tenant@example.com').exists())
+        self.unit.refresh_from_db()
+        self.assertTrue(self.unit.is_occupied)
+
+    def test_non_tenant_email_rejected(self):
+        self.auth(self.landlord_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(email='landlord_inv@example.com'),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_agent_assigned_can_create_invite(self):
+        PropertyAgent.objects.create(property=self.property, agent=self.agent, appointed_by=self.landlord)
+        self.auth(self.agent_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(email='agent_invited@example.com'),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+
+    def test_unassigned_agent_403(self):
+        self.auth(self.agent_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_cannot_invite(self):
+        self.auth(self.tenant_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_landlord_cannot_invite(self):
+        self.auth(self.other_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_duplicate_pending_invite_400(self):
+        self.auth(self.landlord_token)
+        url = reverse('unit-tenant-invitation-list', args=[self.unit.id])
+        p = self.invite_payload(email='dup@example.com')
+        self.assertEqual(self.client.post(url, p, format='json').status_code, status.HTTP_201_CREATED)
+        r2 = self.client.post(url, p, format='json')
+        self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_accept_happy_path(self):
+        self.auth(self.landlord_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(email='accept_me@example.com'),
+            format='json',
+        )
+        token = r.data['invite_token']
+        self.client.credentials()
+        acc = self.client.post(
+            reverse('tenant-invite-accept'),
+            {
+                'token': token,
+                'password': 'TestPass!12345',
+                'national_id': 'N1',
+            },
+            format='json',
+        )
+        self.assertEqual(acc.status_code, status.HTTP_201_CREATED, acc.data)
+        self.assertIn('key', acc.data)
+        u = User.objects.get(email='accept_me@example.com')
+        self.assertTrue(u.check_password('TestPass!12345'))
+        inv = TenantInvitation.objects.get(email__iexact='accept_me@example.com')
+        self.assertEqual(inv.status, 'accepted')
+        self.assertEqual(inv.accepted_user, u)
+        self.assertTrue(Lease.objects.filter(unit=self.unit, tenant=u).exists())
+
+    def test_accept_invalid_token(self):
+        self.client.credentials()
+        r = self.client.post(
+            reverse('tenant-invite-accept'),
+            {'token': 'not-a-real-token', 'password': 'TestPass!12345'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_accept_expired_invitation(self):
+        self.auth(self.landlord_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(email='expired@example.com'),
+            format='json',
+        )
+        inv = TenantInvitation.objects.get(pk=r.data['id'])
+        inv.expires_at = timezone.now() - timedelta(days=1)
+        inv.save(update_fields=['expires_at'])
+        self.client.credentials()
+        r2 = self.client.post(
+            reverse('tenant-invite-accept'),
+            {'token': r.data['invite_token'], 'password': 'TestPass!12345'},
+            format='json',
+        )
+        self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_occupied_unit_cannot_invite(self):
+        self.unit.is_occupied = True
+        self.unit.save()
+        self.auth(self.landlord_token)
+        r = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(email='occ@example.com'),
+            format='json',
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_resend_refreshes_token(self):
+        self.auth(self.landlord_token)
+        r1 = self.client.post(
+            reverse('unit-tenant-invitation-list', args=[self.unit.id]),
+            self.invite_payload(email='resend@example.com'),
+            format='json',
+        )
+        inv_id = r1.data['id']
+        old_hash = TenantInvitation.objects.get(pk=inv_id).token_hash
+        r2 = self.client.post(reverse('tenant-invitation-resend', args=[inv_id]), {}, format='json')
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        self.assertIn('invite_token', r2.data)
+        inv = TenantInvitation.objects.get(pk=inv_id)
+        self.assertNotEqual(inv.token_hash, old_hash)
+        self.assertEqual(inv.token_hash, hash_invite_token(r2.data['invite_token']))
