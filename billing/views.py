@@ -1,4 +1,5 @@
 import json
+import uuid
 import stripe
 from django.conf import settings
 from django.utils import timezone
@@ -11,7 +12,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample
 
 from decimal import Decimal
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Sum, Count
 
 from property.models import Property, Unit, Lease
@@ -19,6 +20,7 @@ from property.views import is_admin, is_landlord, is_agent_for
 from .models import BillingConfig, Invoice, Payment, Receipt, ChargeType, AdditionalIncome, Expense
 from .serializers import (
     BillingConfigSerializer, InvoiceSerializer, InvoiceCreateSerializer,
+    ManualPaymentRecordSerializer,
     PaymentSerializer, ReceiptSerializer,
     ChargeTypeSerializer, AdditionalIncomeSerializer, ExpenseSerializer,
 )
@@ -229,7 +231,18 @@ def pay_invoice(request, pk):
 
 
 @extend_schema(methods=['GET'], summary="List payments for an invoice")
-@api_view(['GET'])
+@extend_schema(
+    methods=['POST'],
+    summary="Record a manual payment (cash, bank transfer, etc.)",
+    examples=[
+        OpenApiExample(
+            "Record manual payment",
+            request_only=True,
+            value={'amount': '25000.00'},
+        ),
+    ],
+)
+@api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def invoice_payments(request, pk):
     try:
@@ -243,8 +256,61 @@ def invoice_payments(request, pk):
     if not (is_admin(user) or prop.owner == user or is_agent_for(user, prop) or is_tenant):
         return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-    payments = invoice.payments.all()
-    return Response(PaymentSerializer(payments, many=True).data)
+    if request.method == 'GET':
+        payments = invoice.payments.all()
+        return Response(PaymentSerializer(payments, many=True).data)
+
+    if not (is_admin(user) or prop.owner == user or is_agent_for(user, prop)):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if invoice.status == 'cancelled':
+        return Response({'detail': 'Invoice is cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ManualPaymentRecordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    amount = serializer.validated_data['amount']
+    remaining = invoice.total_amount - invoice.amount_paid()
+    if remaining <= 0:
+        return Response(
+            {'detail': 'Invoice balance is already fully paid.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if amount > remaining:
+        return Response(
+            {'detail': f'Amount exceeds remaining balance ({remaining}).'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    manual_ref = f'manual-{uuid.uuid4().hex}'
+    try:
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                invoice=invoice,
+                amount=amount,
+                stripe_payment_intent_id=manual_ref,
+                status='completed',
+                paid_at=timezone.now(),
+            )
+            invoice.update_status()
+            receipt = Receipt.objects.create(
+                payment=payment,
+                receipt_number=generate_receipt_number(),
+            )
+    except IntegrityError:
+        return Response(
+            {'detail': 'Could not record payment. Try again.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response(
+        {
+            'payment': PaymentSerializer(payment).data,
+            'receipt': ReceiptSerializer(receipt).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 # ── Stripe Webhook ─────────────────────────────────────────────────────────────

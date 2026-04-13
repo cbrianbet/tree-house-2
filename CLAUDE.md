@@ -230,7 +230,7 @@ Seeded via data migrations. Roles are:
 | GET/POST | `/api/billing/invoices/` | GET: Admin=all, Landlord=own properties, Agent=assigned, Tenant=own — POST: Admin / property owner / assigned agent (requires billing config on property; body: `lease`, `period_start`, `period_end`, `due_date`, optional `rent_amount`) |
 | GET | `/api/billing/invoices/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/invoices/<pk>/pay/` | Tenant only |
-| GET | `/api/billing/invoices/<pk>/payments/` | Owner/Agent/Tenant |
+| GET/POST | `/api/billing/invoices/<pk>/payments/` | GET: Owner/Agent/Tenant — POST: record manual payment (cash/bank); Owner/Assigned Agent/Admin only; body `amount`; creates completed `Payment` (`stripe_payment_intent_id` prefix `manual-`), receipt, updates invoice status |
 | GET | `/api/billing/receipts/` | Scoped by role |
 | GET | `/api/billing/receipts/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/stripe/webhook/` | Stripe (no auth, CSRF exempt) |

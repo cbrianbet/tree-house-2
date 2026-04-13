@@ -69,6 +69,10 @@ class InvoiceCreateSerializer(serializers.Serializer):
         return data
 
 
+class ManualPaymentRecordSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
+
+
 class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment

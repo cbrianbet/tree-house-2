@@ -49,6 +49,7 @@ Content-Type: `application/json`
 | Configure billing | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
 | List / view invoices | ✗ | All | Own | Assigned | Own | ✗ | ✗ |
 | Create invoice (manual) | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
+| Record manual invoice payment | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
 | Pay invoice (Stripe) | ✗ | ✗ | ✗ | ✗ | Own | ✗ | ✗ |
 | View payments & receipts | ✗ | All | Own | Assigned | Own | ✗ | ✗ |
 | Manage charge types | ✗ | ✓ | Own | View only | ✗ | ✗ | ✗ |
@@ -727,6 +728,78 @@ Use this to issue a rent invoice outside the automatic `process_billing` schedul
 | Duplicate `period_start` for that lease | `400` — `An invoice for this lease and period_start already exists.` |
 | Lease inactive or period outside lease dates | `400` — field errors from validation |
 | `period_end` before `period_start` | `400` |
+
+---
+
+### List payments for an invoice
+`GET /api/billing/invoices/<pk>/payments/`
+
+Same visibility as invoice detail: **admin**, **property owner**, **assigned agent**, or **tenant on the lease**.
+
+```json
+[
+  {
+    "id": 3,
+    "invoice": 1,
+    "amount": "25000.00",
+    "stripe_payment_intent_id": "pi_xxx",
+    "stripe_charge_id": "ch_xxx",
+    "status": "completed",
+    "paid_at": "2024-02-15T10:30:00Z",
+    "created_at": "2024-02-15T10:29:00Z"
+  }
+]
+```
+
+Manual (non-Stripe) payments use a synthetic `stripe_payment_intent_id` starting with `manual-`.
+
+---
+
+### Record manual payment (Owner / Assigned Agent / Admin)
+`POST /api/billing/invoices/<pk>/payments/`
+
+Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc.). Creates a **completed** `Payment`, generates a **receipt** (same numbering as Stripe flow), and refreshes the invoice status (`partial` or `paid`).
+
+**Who can call:** platform admin, property owner, or agent assigned to the property. The tenant must use **`POST .../pay/`** for Stripe instead.
+
+**Rules:**
+- `amount` is required (decimal string). It must not exceed the **remaining balance** (`total_amount` minus sum of completed payments).
+- Cannot record on a **cancelled** invoice or when the balance is already **zero**.
+- Multiple POSTs are allowed for **partial** payments until the invoice is fully paid.
+
+```json
+// Request
+{ "amount": "25000.00" }
+```
+
+```json
+// Response 201
+{
+  "payment": {
+    "id": 4,
+    "invoice": 1,
+    "amount": "25000.00",
+    "stripe_payment_intent_id": "manual-abc123...",
+    "stripe_charge_id": "",
+    "status": "completed",
+    "paid_at": "2024-02-15T11:00:00Z",
+    "created_at": "2024-02-15T11:00:00Z"
+  },
+  "receipt": {
+    "id": 2,
+    "payment": 4,
+    "receipt_number": "RCP-202402-0002",
+    "issued_at": "2024-02-15T11:00:00Z"
+  }
+}
+```
+
+| Error | Status |
+|-------|--------|
+| Tenant or unrelated user | `403` |
+| Invoice cancelled | `400` |
+| Balance already zero | `400` |
+| Amount over remaining balance | `400` |
 
 ---
 

@@ -348,6 +348,127 @@ class PaymentTests(APITestCase):
         response = self.client.post(reverse('invoice-pay', args=[self.invoice.id]), {})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_tenant_cannot_record_manual_payment(self):
+        self.auth(self.tenant_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ManualPaymentRecordTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord_mp', 'Landlord')
+        self.other_landlord, self.other_token = make_user('landlord_mp2', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant_mp', 'Tenant')
+        self.agent, self.agent_token = make_user('agent_mp', 'Agent')
+        self.admin, self.admin_token = make_user('admin_mp', 'Admin', is_staff=True)
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+        self.invoice = make_invoice(self.lease)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_landlord_records_full_payment(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['payment']['stripe_payment_intent_id'].startswith('manual-'))
+        self.assertEqual(response.data['payment']['status'], 'completed')
+        self.assertIn('receipt_number', response.data['receipt'])
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'paid')
+        self.assertTrue(Receipt.objects.filter(payment_id=response.data['payment']['id']).exists())
+
+    def test_landlord_partial_then_full(self):
+        self.auth(self.landlord_token)
+        r1 = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '20000.00'},
+        )
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'partial')
+        r2 = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '25000.00'},
+        )
+        self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'paid')
+
+    def test_amount_exceeds_remaining_returns_400(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '50000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_fully_paid_cannot_record_more(self):
+        self.auth(self.landlord_token)
+        self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '1.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cancelled_invoice_rejected(self):
+        self.invoice.status = 'cancelled'
+        self.invoice.save()
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_assigned_agent_can_record(self):
+        PropertyAgent.objects.create(
+            property=self.prop, agent=self.agent, appointed_by=self.landlord
+        )
+        self.auth(self.agent_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_unassigned_agent_forbidden(self):
+        self.auth(self.agent_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_landlord_forbidden(self):
+        self.auth(self.other_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_record(self):
+        self.auth(self.admin_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
 
 class ReceiptTests(APITestCase):
     def setUp(self):
