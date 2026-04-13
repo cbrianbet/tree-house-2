@@ -139,6 +139,18 @@ class AdminRoleStaffSyncTests(APITestCase):
         self.assertTrue(user.is_staff)
 
 
+class CreateSuperuserTests(APITestCase):
+    def test_create_superuser_assigns_admin_role_when_omitted(self):
+        user = User.objects.create_superuser(
+            username='djangoadmin',
+            email='djangoadmin@example.com',
+            password='StrongPass!123',
+        )
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+        self.assertEqual(user.role.name, Role.ADMIN)
+
+
 class TenantProfileAPITests(APITestCase):
     def setUp(self):
         self.role, _ = Role.objects.get_or_create(name="Tenant", defaults={"description": "Tenant role"})
