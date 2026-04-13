@@ -7,6 +7,7 @@ class Notification(models.Model):
         ('message', 'New Message'),
         ('maintenance', 'Maintenance Update'),
         ('payment', 'Payment'),
+        ('payment_reminder', 'Payment Due Reminder'),
         ('lease', 'Lease'),
         ('dispute', 'Dispute'),
         ('application', 'Application'),

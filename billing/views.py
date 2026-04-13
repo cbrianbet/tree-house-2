@@ -1,5 +1,9 @@
+import calendar
 import json
+import uuid
 import stripe
+from datetime import date, timedelta
+
 from django.conf import settings
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -11,20 +15,76 @@ from drf_spectacular.utils import extend_schema, OpenApiExample
 
 from decimal import Decimal
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Sum, Count
 
 from property.models import Property, Unit, Lease
 from property.views import is_admin, is_landlord, is_agent_for
-from .models import BillingConfig, Invoice, Payment, Receipt, ChargeType, AdditionalIncome, Expense
+from .models import (
+    BillingConfig,
+    Invoice,
+    Payment,
+    Receipt,
+    ChargeType,
+    AdditionalIncome,
+    Expense,
+    PropertyBillingNotificationSettings,
+)
 from .serializers import (
     BillingConfigSerializer, InvoiceSerializer, InvoiceCreateSerializer,
+    ManualPaymentRecordSerializer,
     PaymentSerializer, ReceiptSerializer,
     ChargeTypeSerializer, AdditionalIncomeSerializer, ExpenseSerializer,
 )
 from .utils import generate_receipt_number
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+def _property_sends_receipt_on_payment(prop):
+    try:
+        return prop.billing_notification_settings.send_receipt_on_payment
+    except PropertyBillingNotificationSettings.DoesNotExist:
+        return True
+
+
+def _notify_tenant_payment_received(invoice, amount, receipt_number):
+    if not _property_sends_receipt_on_payment(invoice.lease.unit.property):
+        return
+    from notifications.utils import create_notification
+
+    tenant = invoice.lease.tenant
+    create_notification(
+        tenant,
+        'payment',
+        'Payment received',
+        (
+            f'Hi {tenant.first_name or tenant.username},\n\n'
+            f'We recorded a payment of KES {amount} toward invoice #{invoice.id}.\n'
+            f'Receipt: {receipt_number}\n\n'
+            f'Tree House'
+        ),
+        action_url='',
+    )
+
+
+def _billing_clamp_due_day(due_day, year, month):
+    return min(due_day, calendar.monthrange(year, month)[1])
+
+
+def _next_invoice_generation_on_or_after(start, rent_due_day, lead_days):
+    for i in range(370):
+        d = start + timedelta(days=i)
+        cd = _billing_clamp_due_day(rent_due_day, d.year, d.month)
+        gen_d = max(1, cd - lead_days)
+        if d.day == gen_d:
+            return d
+    return None
+
+
+def _next_rent_anchor_from_gen(gen_date, rent_due_day):
+    cd = _billing_clamp_due_day(rent_due_day, gen_date.year, gen_date.month)
+    return date(gen_date.year, gen_date.month, cd)
 
 
 # ── Billing Config ─────────────────────────────────────────────────────────────
@@ -39,6 +99,19 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
             "grace_period_days": 3,
             "late_fee_percentage": "5.00",
             "late_fee_max_percentage": "20.00",
+            "invoice_lead_days": 0,
+            "late_fee_mode": "percentage",
+            "late_fee_fixed_amount": None,
+            "mpesa_paybill": "123456",
+            "mpesa_account_label": "Unit code + phone",
+            "bank_name": "Example Bank",
+            "bank_account": "0123456789",
+            "payment_notes": "Reference: invoice number",
+            "notification_settings": {
+                "remind_before_due_days": 3,
+                "remind_after_overdue_days": 0,
+                "send_receipt_on_payment": True,
+            },
         })
     ],
 )
@@ -50,7 +123,10 @@ def billing_config(request, property_id):
     except Property.DoesNotExist:
         return Response({'detail': 'Property not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-    if not (is_admin(request.user) or property.owner == request.user):
+    can_read = is_admin(request.user) or property.owner == request.user or is_agent_for(request.user, property)
+    can_write = is_admin(request.user) or property.owner == request.user
+
+    if not can_read:
         return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
@@ -58,9 +134,27 @@ def billing_config(request, property_id):
             config = property.billing_config
             return Response(BillingConfigSerializer(config).data)
         except BillingConfig.DoesNotExist:
-            return Response({'detail': 'No billing config set for this property.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                'configured': False,
+                'property': property.id,
+                'rent_due_day': 1,
+                'grace_period_days': 0,
+                'late_fee_percentage': '0.00',
+                'late_fee_max_percentage': None,
+                'invoice_lead_days': 0,
+                'late_fee_mode': BillingConfig.LATE_FEE_MODE_PERCENTAGE,
+                'late_fee_fixed_amount': None,
+                'mpesa_paybill': '',
+                'mpesa_account_label': '',
+                'bank_name': '',
+                'bank_account': '',
+                'payment_notes': '',
+                'notification_settings': None,
+            })
 
     elif request.method == 'POST':
+        if not can_write:
+            return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             config = property.billing_config
             serializer = BillingConfigSerializer(config, data=request.data, partial=True)
@@ -68,8 +162,8 @@ def billing_config(request, property_id):
             serializer = BillingConfigSerializer(data=request.data)
 
         if serializer.is_valid():
-            serializer.save(property=property, updated_by=request.user)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            instance = serializer.save(property=property, updated_by=request.user)
+            return Response(BillingConfigSerializer(instance).data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -229,7 +323,18 @@ def pay_invoice(request, pk):
 
 
 @extend_schema(methods=['GET'], summary="List payments for an invoice")
-@api_view(['GET'])
+@extend_schema(
+    methods=['POST'],
+    summary="Record a manual payment (cash, bank transfer, etc.)",
+    examples=[
+        OpenApiExample(
+            "Record manual payment",
+            request_only=True,
+            value={'amount': '25000.00'},
+        ),
+    ],
+)
+@api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def invoice_payments(request, pk):
     try:
@@ -243,8 +348,62 @@ def invoice_payments(request, pk):
     if not (is_admin(user) or prop.owner == user or is_agent_for(user, prop) or is_tenant):
         return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
-    payments = invoice.payments.all()
-    return Response(PaymentSerializer(payments, many=True).data)
+    if request.method == 'GET':
+        payments = invoice.payments.all()
+        return Response(PaymentSerializer(payments, many=True).data)
+
+    if not (is_admin(user) or prop.owner == user or is_agent_for(user, prop)):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if invoice.status == 'cancelled':
+        return Response({'detail': 'Invoice is cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ManualPaymentRecordSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    amount = serializer.validated_data['amount']
+    remaining = invoice.total_amount - invoice.amount_paid()
+    if remaining <= 0:
+        return Response(
+            {'detail': 'Invoice balance is already fully paid.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if amount > remaining:
+        return Response(
+            {'detail': f'Amount exceeds remaining balance ({remaining}).'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    manual_ref = f'manual-{uuid.uuid4().hex}'
+    try:
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                invoice=invoice,
+                amount=amount,
+                stripe_payment_intent_id=manual_ref,
+                status='completed',
+                paid_at=timezone.now(),
+            )
+            invoice.update_status()
+            receipt = Receipt.objects.create(
+                payment=payment,
+                receipt_number=generate_receipt_number(),
+            )
+            _notify_tenant_payment_received(invoice, amount, receipt.receipt_number)
+    except IntegrityError:
+        return Response(
+            {'detail': 'Could not record payment. Try again.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response(
+        {
+            'payment': PaymentSerializer(payment).data,
+            'receipt': ReceiptSerializer(receipt).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 # ── Stripe Webhook ─────────────────────────────────────────────────────────────
@@ -290,10 +449,11 @@ def _handle_payment_success(intent):
 
     # Auto-generate receipt
     if not hasattr(payment, 'receipt'):
-        Receipt.objects.create(
+        receipt = Receipt.objects.create(
             payment=payment,
             receipt_number=generate_receipt_number(),
         )
+        _notify_tenant_payment_received(payment.invoice, payment.amount, receipt.receipt_number)
 
 
 def _handle_payment_failure(intent):
@@ -370,8 +530,10 @@ def charge_type_list_create(request, property_pk):
         return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
-        charge_types = prop.charge_types.all()
-        return Response(ChargeTypeSerializer(charge_types, many=True).data)
+        qs = prop.charge_types.all().order_by('display_order', 'id')
+        if request.query_params.get('include_inactive') not in ('1', 'true', 'yes'):
+            qs = qs.filter(is_active=True)
+        return Response(ChargeTypeSerializer(qs, many=True).data)
 
     elif request.method == 'POST':
         if not (is_admin(user) or prop.owner == user):
@@ -426,6 +588,11 @@ def charge_type_detail(request, property_pk, pk):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
+        if AdditionalIncome.objects.filter(charge_type=charge_type).exists():
+            return Response(
+                {'detail': 'Charge type has income entries; set is_active=false instead of deleting.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         charge_type.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -611,6 +778,79 @@ def expense_detail(request, property_pk, pk):
     elif request.method == 'DELETE':
         expense.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Billing preview ─────────────────────────────────────────────────────────────
+
+@extend_schema(
+    methods=['GET'],
+    summary="Preview next invoice generation date and rent roll for a property",
+    examples=[
+        OpenApiExample(
+            "Preview",
+            value={
+                'configured': True,
+                'property': 1,
+                'invoice_lead_days': 2,
+                'rent_due_day': 5,
+                'grace_period_days': 3,
+                'next_invoice_generation_date': '2026-04-03',
+                'next_rent_due_date': '2026-04-08',
+                'active_lease_count': 4,
+                'estimated_monthly_rent_total': '180000.00',
+            },
+        ),
+    ],
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def billing_preview(request, property_pk):
+    try:
+        prop = Property.objects.get(pk=property_pk)
+    except Property.DoesNotExist:
+        return Response({'detail': 'Property not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    user = request.user
+    if not (is_admin(user) or prop.owner == user or is_agent_for(user, prop)):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    today = timezone.now().date()
+    active = Lease.objects.filter(unit__property=prop, is_active=True)
+    lease_count = active.count()
+    rent_total = active.aggregate(t=Sum('rent_amount'))['t'] or Decimal('0')
+
+    try:
+        config = prop.billing_config
+    except BillingConfig.DoesNotExist:
+        return Response({
+            'configured': False,
+            'property': prop.id,
+            'invoice_lead_days': 0,
+            'rent_due_day': 1,
+            'grace_period_days': 0,
+            'next_invoice_generation_date': None,
+            'next_rent_due_date': None,
+            'active_lease_count': lease_count,
+            'estimated_monthly_rent_total': str(rent_total),
+        })
+
+    next_gen = _next_invoice_generation_on_or_after(today, config.rent_due_day, config.invoice_lead_days)
+    next_due = None
+    if next_gen:
+        anchor = _next_rent_anchor_from_gen(next_gen, config.rent_due_day)
+        next_due = anchor + timedelta(days=config.grace_period_days)
+
+    return Response({
+        'configured': True,
+        'property': prop.id,
+        'invoice_lead_days': config.invoice_lead_days,
+        'rent_due_day': config.rent_due_day,
+        'grace_period_days': config.grace_period_days,
+        'next_invoice_generation_date': next_gen,
+        'next_rent_due_date': next_due,
+        'active_lease_count': lease_count,
+        'estimated_monthly_rent_total': str(rent_total),
+    })
 
 
 # ── Financial Report ────────────────────────────────────────────────────────────

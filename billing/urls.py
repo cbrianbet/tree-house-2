@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('config/<int:property_id>/', views.billing_config, name='billing-config'),
+    path('properties/<int:property_pk>/billing-preview/', views.billing_preview, name='billing-preview'),
     path('invoices/', views.invoice_list, name='invoice-list'),
     path('invoices/<int:pk>/', views.invoice_detail, name='invoice-detail'),
     path('invoices/<int:pk>/pay/', views.pay_invoice, name='invoice-pay'),

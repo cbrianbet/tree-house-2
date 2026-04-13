@@ -5,16 +5,64 @@ from property.models import Property, Unit, Lease
 
 
 class BillingConfig(models.Model):
+    LATE_FEE_MODE_PERCENTAGE = 'percentage'
+    LATE_FEE_MODE_FIXED = 'fixed'
+    LATE_FEE_MODE_CHOICES = [
+        (LATE_FEE_MODE_PERCENTAGE, 'Percentage'),
+        (LATE_FEE_MODE_FIXED, 'Fixed'),
+    ]
+
     property = models.OneToOneField(Property, on_delete=models.CASCADE, related_name='billing_config')
     rent_due_day = models.PositiveIntegerField(help_text="Day of month rent is due (1-28)")
     grace_period_days = models.PositiveIntegerField(default=0, help_text="Days after due date before late fee applies")
     late_fee_percentage = models.DecimalField(max_digits=5, decimal_places=2, help_text="Late fee as % of rent amount")
     late_fee_max_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Cap on total late fees as % of rent")
+    invoice_lead_days = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Days before rent_due_day to generate invoice (0 = on due day).",
+    )
+    late_fee_mode = models.CharField(
+        max_length=20, choices=LATE_FEE_MODE_CHOICES, default=LATE_FEE_MODE_PERCENTAGE,
+    )
+    late_fee_fixed_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+    )
+    mpesa_paybill = models.CharField(max_length=50, blank=True)
+    mpesa_account_label = models.CharField(max_length=100, blank=True)
+    bank_name = models.CharField(max_length=200, blank=True)
+    bank_account = models.CharField(max_length=100, blank=True)
+    payment_notes = models.TextField(blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     updated_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
 
     def __str__(self):
         return f"BillingConfig for {self.property.name}"
+
+
+class PropertyBillingNotificationSettings(models.Model):
+    """Per-property billing email/in-app reminder behavior (optional row)."""
+
+    property = models.OneToOneField(
+        Property, on_delete=models.CASCADE, related_name='billing_notification_settings',
+    )
+    remind_before_due_days = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="Days before due_date for pre-due reminder; null disables. If no settings row, legacy 3 applies.",
+    )
+    remind_after_overdue_days = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="Days after due_date before overdue reminder; null treats as 0 (as soon as overdue).",
+    )
+    send_receipt_on_payment = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = 'Property billing notification settings'
+        verbose_name_plural = 'Property billing notification settings'
+
+    def __str__(self):
+        return f"BillingNotificationSettings({self.property.name})"
 
 
 class Invoice(models.Model):
@@ -104,8 +152,25 @@ class ReminderLog(models.Model):
 
 class ChargeType(models.Model):
     """Landlord-defined income categories per property (water, electricity, service charge, etc.)."""
+
+    KIND_FIXED = 'fixed'
+    KIND_VARIABLE = 'variable'
+    KIND_PER_UNIT = 'per_unit'
+    CHARGE_KIND_CHOICES = [
+        (KIND_FIXED, 'Fixed'),
+        (KIND_VARIABLE, 'Variable'),
+        (KIND_PER_UNIT, 'Per unit'),
+    ]
+
     property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='charge_types')
     name = models.CharField(max_length=100)
+    charge_kind = models.CharField(
+        max_length=20, choices=CHARGE_KIND_CHOICES, default=KIND_VARIABLE,
+    )
+    default_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    description = models.TextField(blank=True)
+    display_order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
     created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='created_charge_types')
     created_at = models.DateTimeField(auto_now_add=True)
 

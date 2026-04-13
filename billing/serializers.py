@@ -3,20 +3,103 @@ from decimal import Decimal
 from rest_framework import serializers
 from property.models import Lease
 
-from .models import BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
+from .models import (
+    BillingConfig,
+    Invoice,
+    Payment,
+    Receipt,
+    ReminderLog,
+    ChargeType,
+    AdditionalIncome,
+    Expense,
+    PropertyBillingNotificationSettings,
+)
+
+
+class PropertyBillingNotificationSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyBillingNotificationSettings
+        fields = [
+            'remind_before_due_days',
+            'remind_after_overdue_days',
+            'send_receipt_on_payment',
+        ]
 
 
 class BillingConfigSerializer(serializers.ModelSerializer):
+    notification_settings = PropertyBillingNotificationSettingsSerializer(
+        required=False, write_only=True,
+    )
+
     class Meta:
         model = BillingConfig
-        fields = ['id', 'property', 'rent_due_day', 'grace_period_days',
-                  'late_fee_percentage', 'late_fee_max_percentage', 'updated_at', 'updated_by']
+        fields = [
+            'id', 'property', 'rent_due_day', 'grace_period_days',
+            'late_fee_percentage', 'late_fee_max_percentage',
+            'invoice_lead_days', 'late_fee_mode', 'late_fee_fixed_amount',
+            'mpesa_paybill', 'mpesa_account_label', 'bank_name', 'bank_account', 'payment_notes',
+            'notification_settings',
+            'updated_at', 'updated_by',
+        ]
         read_only_fields = ['property', 'updated_at', 'updated_by']
 
     def validate_rent_due_day(self, value):
         if not (1 <= value <= 28):
             raise serializers.ValidationError("rent_due_day must be between 1 and 28.")
         return value
+
+    def validate_invoice_lead_days(self, value):
+        if value > 27:
+            raise serializers.ValidationError("invoice_lead_days must be at most 27.")
+        return value
+
+    def validate(self, attrs):
+        instance = self.instance
+        mode = attrs.get('late_fee_mode', getattr(instance, 'late_fee_mode', None) if instance else BillingConfig.LATE_FEE_MODE_PERCENTAGE)
+        if mode is None:
+            mode = BillingConfig.LATE_FEE_MODE_PERCENTAGE
+
+        fixed = attrs.get('late_fee_fixed_amount', getattr(instance, 'late_fee_fixed_amount', None) if instance else None)
+
+        if mode == BillingConfig.LATE_FEE_MODE_FIXED:
+            if fixed is None or fixed == '':
+                raise serializers.ValidationError({
+                    'late_fee_fixed_amount': 'This field is required when late_fee_mode is fixed.',
+                })
+        elif mode == BillingConfig.LATE_FEE_MODE_PERCENTAGE:
+            attrs['late_fee_fixed_amount'] = None
+
+        return attrs
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['configured'] = True
+        try:
+            ns = instance.property.billing_notification_settings
+            data['notification_settings'] = PropertyBillingNotificationSettingsSerializer(ns).data
+        except PropertyBillingNotificationSettings.DoesNotExist:
+            data['notification_settings'] = None
+        return data
+
+    def create(self, validated_data):
+        notification_data = validated_data.pop('notification_settings', None)
+        config = super().create(validated_data)
+        if notification_data is not None:
+            PropertyBillingNotificationSettings.objects.update_or_create(
+                property=config.property,
+                defaults=notification_data,
+            )
+        return config
+
+    def update(self, instance, validated_data):
+        notification_data = validated_data.pop('notification_settings', None)
+        config = super().update(instance, validated_data)
+        if notification_data is not None:
+            PropertyBillingNotificationSettings.objects.update_or_create(
+                property=config.property,
+                defaults=notification_data,
+            )
+        return config
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
@@ -69,6 +152,10 @@ class InvoiceCreateSerializer(serializers.Serializer):
         return data
 
 
+class ManualPaymentRecordSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
+
+
 class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment
@@ -92,7 +179,10 @@ class ReminderLogSerializer(serializers.ModelSerializer):
 class ChargeTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChargeType
-        fields = ['id', 'property', 'name', 'created_by', 'created_at']
+        fields = [
+            'id', 'property', 'name', 'charge_kind', 'default_amount', 'description',
+            'display_order', 'is_active', 'created_by', 'created_at',
+        ]
         read_only_fields = ['property', 'created_by', 'created_at']
 
 

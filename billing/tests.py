@@ -12,7 +12,17 @@ from django.contrib.auth import get_user_model
 
 from authentication.models import Role
 from property.models import Property, Unit, Lease, PropertyAgent
-from billing.models import BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
+from billing.models import (
+    BillingConfig,
+    Invoice,
+    Payment,
+    Receipt,
+    ReminderLog,
+    ChargeType,
+    AdditionalIncome,
+    Expense,
+    PropertyBillingNotificationSettings,
+)
 from billing.utils import generate_receipt_number
 
 User = get_user_model()
@@ -103,10 +113,58 @@ class BillingConfigTests(APITestCase):
         response = self.client.post(reverse('billing-config', args=[self.prop.id]), data)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_get_config_not_found(self):
+    def test_get_config_returns_defaults_when_unset(self):
         self.auth(self.landlord_token)
         response = self.client.get(reverse('billing-config', args=[self.prop.id]))
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['configured'])
+        self.assertEqual(response.data['rent_due_day'], 1)
+        self.assertEqual(response.data['invoice_lead_days'], 0)
+
+    def test_assigned_agent_can_get_billing_config(self):
+        from property.models import PropertyAgent
+        agent, agent_token = make_user('agent_bc', 'Agent')
+        PropertyAgent.objects.create(property=self.prop, agent=agent, appointed_by=self.landlord)
+        self.auth(agent_token)
+        response = self.client.get(reverse('billing-config', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_agent_cannot_post_billing_config(self):
+        agent, agent_token = make_user('agent_bc2', 'Agent')
+        from property.models import PropertyAgent
+        PropertyAgent.objects.create(property=self.prop, agent=agent, appointed_by=self.landlord)
+        self.auth(agent_token)
+        response = self.client.post(
+            reverse('billing-config', args=[self.prop.id]),
+            {'rent_due_day': 5, 'grace_period_days': 0, 'late_fee_percentage': '5.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_late_fee_fixed_mode_requires_amount(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('billing-config', args=[self.prop.id]),
+            {
+                'rent_due_day': 5,
+                'grace_period_days': 0,
+                'late_fee_percentage': '5.00',
+                'late_fee_mode': 'fixed',
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invoice_lead_days_above_27_rejected(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('billing-config', args=[self.prop.id]),
+            {
+                'rent_due_day': 5,
+                'grace_period_days': 0,
+                'late_fee_percentage': '5.00',
+                'invoice_lead_days': 28,
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class InvoiceTests(APITestCase):
@@ -348,6 +406,143 @@ class PaymentTests(APITestCase):
         response = self.client.post(reverse('invoice-pay', args=[self.invoice.id]), {})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_tenant_cannot_record_manual_payment(self):
+        self.auth(self.tenant_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ManualPaymentRecordTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord_mp', 'Landlord')
+        self.other_landlord, self.other_token = make_user('landlord_mp2', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant_mp', 'Tenant')
+        self.agent, self.agent_token = make_user('agent_mp', 'Agent')
+        self.admin, self.admin_token = make_user('admin_mp', 'Admin', is_staff=True)
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+        self.invoice = make_invoice(self.lease)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    @patch('notifications.utils.create_notification')
+    def test_landlord_records_full_payment(self, mock_notify):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['payment']['stripe_payment_intent_id'].startswith('manual-'))
+        self.assertEqual(response.data['payment']['status'], 'completed')
+        self.assertIn('receipt_number', response.data['receipt'])
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'paid')
+        self.assertTrue(Receipt.objects.filter(payment_id=response.data['payment']['id']).exists())
+        mock_notify.assert_called_once()
+
+    @patch('notifications.utils.create_notification')
+    def test_manual_payment_skips_notification_when_disabled(self, mock_notify):
+        PropertyBillingNotificationSettings.objects.create(
+            property=self.prop,
+            send_receipt_on_payment=False,
+        )
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        mock_notify.assert_not_called()
+
+    def test_landlord_partial_then_full(self):
+        self.auth(self.landlord_token)
+        r1 = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '20000.00'},
+        )
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'partial')
+        r2 = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '25000.00'},
+        )
+        self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'paid')
+
+    def test_amount_exceeds_remaining_returns_400(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '50000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_fully_paid_cannot_record_more(self):
+        self.auth(self.landlord_token)
+        self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '1.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cancelled_invoice_rejected(self):
+        self.invoice.status = 'cancelled'
+        self.invoice.save()
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_assigned_agent_can_record(self):
+        PropertyAgent.objects.create(
+            property=self.prop, agent=self.agent, appointed_by=self.landlord
+        )
+        self.auth(self.agent_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_unassigned_agent_forbidden(self):
+        self.auth(self.agent_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_other_landlord_forbidden(self):
+        self.auth(self.other_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_can_record(self):
+        self.auth(self.admin_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
 
 class ReceiptTests(APITestCase):
     def setUp(self):
@@ -473,8 +668,8 @@ class ProcessBillingCommandTests(APITestCase):
         self.assertEqual(overdue_invoice.late_fee_amount, Decimal('2250.00'))  # 5% of 45000
         self.assertEqual(overdue_invoice.total_amount, Decimal('47250.00'))
 
-    @patch('billing.management.commands.process_billing.send_mail')
-    def test_pre_due_reminder_sent(self, mock_mail):
+    @patch('notifications.utils.create_notification')
+    def test_pre_due_reminder_sent(self, mock_notify):
         invoice = Invoice.objects.create(
             lease=self.lease,
             period_start=date.today().replace(day=1),
@@ -487,11 +682,11 @@ class ProcessBillingCommandTests(APITestCase):
         )
         from django.core.management import call_command
         call_command('process_billing', verbosity=0)
-        mock_mail.assert_called()
+        mock_notify.assert_called()
         self.assertTrue(ReminderLog.objects.filter(invoice=invoice, reminder_type='pre_due').exists())
 
-    @patch('billing.management.commands.process_billing.send_mail')
-    def test_reminder_not_sent_twice(self, mock_mail):
+    @patch('notifications.utils.create_notification')
+    def test_reminder_not_sent_twice(self, mock_notify):
         invoice = Invoice.objects.create(
             lease=self.lease,
             period_start=date.today().replace(day=1),
@@ -505,7 +700,65 @@ class ProcessBillingCommandTests(APITestCase):
         ReminderLog.objects.create(invoice=invoice, reminder_type='pre_due')
         from django.core.management import call_command
         call_command('process_billing', verbosity=0)
-        mock_mail.assert_not_called()
+        mock_notify.assert_not_called()
+
+    @patch('notifications.utils.create_notification')
+    def test_pre_due_disabled_when_notification_settings_null(self, mock_notify):
+        PropertyBillingNotificationSettings.objects.create(
+            property=self.prop,
+            remind_before_due_days=None,
+        )
+        Invoice.objects.create(
+            lease=self.lease,
+            period_start=date.today().replace(day=1),
+            period_end=date.today(),
+            due_date=date.today() + timedelta(days=3),
+            rent_amount=Decimal('45000'),
+            late_fee_amount=Decimal('0'),
+            total_amount=Decimal('45000'),
+            status='pending',
+        )
+        from django.core.management import call_command
+        call_command('process_billing', verbosity=0)
+        mock_notify.assert_not_called()
+
+    @patch('django.utils.timezone.now')
+    def test_invoice_generated_with_lead_days(self, mock_now):
+        from django.core.management import call_command
+        from django.utils import timezone as dj_tz
+        from datetime import datetime
+
+        mock_now.return_value = dj_tz.make_aware(datetime(2026, 4, 13, 12, 0, 0))
+        cfg = BillingConfig.objects.get(property=self.prop)
+        cfg.rent_due_day = 15
+        cfg.invoice_lead_days = 2
+        cfg.save()
+        call_command('process_billing', verbosity=0)
+        inv = Invoice.objects.filter(lease=self.lease).first()
+        self.assertIsNotNone(inv)
+        self.assertEqual(inv.period_start, date(2026, 4, 1))
+        self.assertEqual(inv.due_date, date(2026, 4, 18))
+
+    def test_late_fee_fixed_mode(self):
+        from django.core.management import call_command
+        cfg = BillingConfig.objects.get(property=self.prop)
+        cfg.late_fee_mode = BillingConfig.LATE_FEE_MODE_FIXED
+        cfg.late_fee_fixed_amount = Decimal('500.00')
+        cfg.save()
+        overdue_invoice = Invoice.objects.create(
+            lease=self.lease,
+            period_start=date.today().replace(day=1),
+            period_end=date.today(),
+            due_date=date.today() - timedelta(days=1),
+            rent_amount=Decimal('45000'),
+            late_fee_amount=Decimal('0'),
+            total_amount=Decimal('45000'),
+            status='pending',
+        )
+        call_command('process_billing', verbosity=0)
+        overdue_invoice.refresh_from_db()
+        self.assertEqual(overdue_invoice.late_fee_amount, Decimal('500.00'))
+        self.assertEqual(overdue_invoice.total_amount, Decimal('45500.00'))
 
 
 class ChargeTypeTests(APITestCase):
@@ -572,6 +825,79 @@ class ChargeTypeTests(APITestCase):
         self.auth(self.landlord_token)
         response = self.client.delete(reverse('charge-type-detail', args=[self.prop.id, ct.id]))
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_cannot_delete_charge_type_with_income_entries(self):
+        ct = ChargeType.objects.create(property=self.prop, name='Garbage', created_by=self.landlord)
+        unit = make_unit(self.prop, self.landlord)
+        AdditionalIncome.objects.create(
+            unit=unit, charge_type=ct, amount=Decimal('100'), date=date.today(), recorded_by=self.landlord
+        )
+        self.auth(self.landlord_token)
+        response = self.client.delete(reverse('charge-type-detail', args=[self.prop.id, ct.id]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_inactive_charge_types_hidden_by_default(self):
+        ChargeType.objects.create(
+            property=self.prop, name='Old', created_by=self.landlord, is_active=False
+        )
+        ChargeType.objects.create(property=self.prop, name='New', created_by=self.landlord, is_active=True)
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('charge-type-list', args=[self.prop.id]))
+        self.assertEqual(len(response.data), 1)
+        response_all = self.client.get(
+            reverse('charge-type-list', args=[self.prop.id]) + '?include_inactive=1'
+        )
+        self.assertEqual(len(response_all.data), 2)
+
+
+class BillingPreviewTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord_pv', 'Landlord')
+        self.agent, self.agent_token = make_user('agent_pv', 'Agent')
+        self.tenant, _ = make_user('tenant_pv', 'Tenant')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        make_lease(self.unit, self.tenant)
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_preview_requires_config_for_dates(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('billing-preview', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['configured'])
+        self.assertIsNone(response.data['next_invoice_generation_date'])
+
+    def test_preview_with_config(self):
+        BillingConfig.objects.create(
+            property=self.prop,
+            rent_due_day=15,
+            grace_period_days=3,
+            late_fee_percentage='5.00',
+            invoice_lead_days=2,
+            updated_by=self.landlord,
+        )
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('billing-preview', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['configured'])
+        self.assertEqual(response.data['invoice_lead_days'], 2)
+        self.assertEqual(response.data['active_lease_count'], 1)
+
+    def test_assigned_agent_can_preview(self):
+        from property.models import PropertyAgent
+        BillingConfig.objects.create(
+            property=self.prop,
+            rent_due_day=5,
+            grace_period_days=0,
+            late_fee_percentage='5.00',
+            updated_by=self.landlord,
+        )
+        PropertyAgent.objects.create(property=self.prop, agent=self.agent, appointed_by=self.landlord)
+        self.auth(self.agent_token)
+        response = self.client.get(reverse('billing-preview', args=[self.prop.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
 class AdditionalIncomeTests(APITestCase):
