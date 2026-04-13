@@ -80,6 +80,7 @@ class RoleAPITests(APITestCase):
 class RegistrationTestCase(APITestCase):
     def setUp(self):
         self.role, _ = Role.objects.get_or_create(name="Tenant", defaults={"description": "Test role"})
+        self.admin_role, _ = Role.objects.get_or_create(name=Role.ADMIN, defaults={"description": "Administrator role"})
 
     # Python 3.14 broke super().__copy__() in Django 4.2's BaseContext, which the test
     # client triggers whenever allauth renders a template (email confirm or login message).
@@ -106,6 +107,36 @@ class RegistrationTestCase(APITestCase):
         self.assertEqual(user.role, self.role)
         self.assertEqual(user.first_name, "Test")
         self.assertEqual(user.last_name, "User")
+
+    @override_settings(ACCOUNT_EMAIL_VERIFICATION='none')
+    @patch('allauth.account.adapter.DefaultAccountAdapter.add_message')
+    def test_register_rejects_admin_role(self, _mock_msg):
+        url = reverse('rest_register')
+        data = {
+            "first_name": "Admin",
+            "last_name": "User",
+            "username": "badadmin",
+            "email": "badadmin@example.com",
+            "password1": "StrongPass!123",
+            "password2": "StrongPass!123",
+            "role": self.admin_role.id,
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('role', response.data)
+
+
+class AdminRoleStaffSyncTests(APITestCase):
+    def test_admin_role_forces_staff_flag(self):
+        admin_role, _ = Role.objects.get_or_create(name=Role.ADMIN, defaults={"description": "Administrator role"})
+        user = User.objects.create_user(
+            username="adminsync",
+            password="testpass",
+            role=admin_role,
+            is_staff=False,
+        )
+        user.refresh_from_db()
+        self.assertTrue(user.is_staff)
 
 
 class TenantProfileAPITests(APITestCase):
