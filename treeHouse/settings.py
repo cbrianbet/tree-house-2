@@ -174,6 +174,10 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@treehouse.com')
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 EMAIL_CONFIRM_REDIRECT_BASE_URL = os.getenv("EMAIL_CONFIRM_REDIRECT_BASE_URL", "http://localhost:8000/email-confirm/")
 PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL = os.getenv("PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL", "http://localhost:8000/password-reset-confirm/")
+TENANT_INVITE_REDIRECT_BASE_URL = os.getenv(
+    "TENANT_INVITE_REDIRECT_BASE_URL",
+    "http://localhost:8000/tenant-invite/",
+)
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/

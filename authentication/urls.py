@@ -8,6 +8,7 @@ from dj_rest_auth.views import (
     PasswordResetView,
 )
 from authentication.views import email_confirm_redirect, password_reset_confirm_redirect
+from property.views import tenant_invitation_accept
 from dj_rest_auth.registration.views import RegisterView
 from dj_rest_auth.views import LoginView, LogoutView, UserDetailsView
 from django.urls import path
@@ -82,6 +83,7 @@ _password_reset_confirm_view = extend_schema(
 
 
 urlpatterns = [
+    path("tenant-invite/accept/", tenant_invitation_accept, name="tenant-invite-accept"),
     path("register/", _register_view.as_view(), name="rest_register"),
     path("login/", _login_view.as_view(), name="rest_login"),
     path("logout/", LogoutView.as_view(), name="rest_logout"),

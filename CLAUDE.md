@@ -28,6 +28,7 @@ DB_HOST=
 DB_PORT=
 EMAIL_CONFIRM_REDIRECT_BASE_URL=
 PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL=
+TENANT_INVITE_REDIRECT_BASE_URL=
 DEFAULT_FROM_EMAIL=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
@@ -75,11 +76,11 @@ authentication/     # user management app
   adapter.py        # CustomAccountAdapter — saves extra fields on registration
   migrations/       # 0004 seeds roles, 0005 adds ArtisanProfile, 0006 seeds Artisan role, 0008 adds MovingCompanyProfile, 0009 seeds MovingCompany role
 property/           # property management app
-  models.py         # Property, Unit, Lease, PropertyImage, PropertyAgent, TenantApplication
+  models.py         # Property, Unit, Lease, PropertyImage, PropertyAgent, TenantApplication, TenantInvitation
   serializers.py    # serializers for all models
   views.py          # CRUD views + permission helpers (is_landlord, is_admin, is_agent_for) + dashboard
   urls.py           # all URL patterns under /api/property/
-  migrations/       # 0005 adds PropertyAgent, 0006 adds TenantApplication
+  migrations/       # 0005 adds PropertyAgent, 0006 adds TenantApplication, 0009 adds TenantInvitation
 billing/            # rent collection, invoicing, expenses, and reporting app
   models.py         # BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
   serializers.py    # serializers for all models
@@ -145,6 +146,7 @@ templates/          # Django templates directory
 ## Auth Flow
 - Registration: `POST /api/auth/register/` — creates user, triggers email verification (console backend in dev)
 - Login: `POST /api/auth/login/` — returns a Token
+- Tenant invite accept: `POST /api/auth/tenant-invite/accept/` — no auth; body includes invitation `token` and `password`; creates tenant user, profile, lease, returns auth `key` (same as login)
 - All protected endpoints require: `Authorization: Token <token>`
 
 ## Roles
@@ -163,6 +165,7 @@ Seeded via data migrations. Roles are:
 |--------|-----|-------------|
 | POST | `/api/auth/register/` | Register new user |
 | POST | `/api/auth/login/` | Login, returns token |
+| POST | `/api/auth/tenant-invite/accept/` | Accept tenant invitation (no auth); returns token key + user |
 | POST | `/api/auth/logout/` | Logout |
 | GET | `/api/auth/user/` | Current user details (dj-rest-auth) |
 | POST | `/api/auth/password/reset/` | Request password reset email |
@@ -199,6 +202,8 @@ Seeded via data migrations. Roles are:
 | DELETE | `/api/property/units/<pk>/` | Admin, owner only |
 | GET/POST | `/api/property/units/<pk>/images/` | GET=any, POST=admin/owner/agent |
 | GET/POST | `/api/property/units/<pk>/lease/` | Admin, owner, assigned agent |
+| GET/POST | `/api/property/units/<pk>/tenant-invitations/` | List/create invites — owner or assigned agent; if email matches existing Tenant, creates lease instead of invite |
+| POST | `/api/property/tenant-invitations/<pk>/resend/` | Owner or assigned agent — new token + email |
 | GET | `/api/property/units/public/` | No auth required |
 | GET/POST | `/api/property/applications/` | Landlord=own units, Tenant=own, Admin=all |
 | GET/PUT | `/api/property/applications/<pk>/` | Landlord: approve/reject — Tenant: withdraw |

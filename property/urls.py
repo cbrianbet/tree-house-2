@@ -11,6 +11,8 @@ urlpatterns = [
     path('units/<int:unit_id>/images/', views.unit_image_list_create, name='unit-image-list-create'),
     path('units/<int:unit_id>/images/<int:image_id>/', views.unit_image_detail, name='unit-image-detail'),
     path('units/<int:unit_id>/lease/', views.lease_list_create, name='lease-list-create'),
+    path('units/<int:unit_id>/tenant-invitations/', views.tenant_invitation_list_create, name='unit-tenant-invitation-list'),
+    path('tenant-invitations/<int:pk>/resend/', views.tenant_invitation_resend, name='tenant-invitation-resend'),
     path('units/public/', views.public_units, name='public-units'),
     # Tenant applications
     path('applications/', views.application_list_create, name='application-list'),

@@ -57,6 +57,7 @@ SECRET_KEY=<generate-a-long-random-string>
 # Email (redirect URLs for email verification and password reset flows)
 EMAIL_CONFIRM_REDIRECT_BASE_URL=http://localhost:8000/email-confirm/
 PASSWORD_RESET_CONFIRM_REDIRECT_BASE_URL=http://localhost:8000/password-reset-confirm/
+TENANT_INVITE_REDIRECT_BASE_URL=http://localhost:3000/tenant-invite/
 DEFAULT_FROM_EMAIL=noreply@yourdomain.com
 
 # Stripe (use placeholders for local dev — real keys needed for payment testing)

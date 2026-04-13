@@ -188,3 +188,44 @@ class SavedSearch(models.Model):
 
     def __str__(self):
         return f"{self.user.username} — {self.name}"
+
+
+class TenantInvitation(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('expired', 'Expired'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name='tenant_invitations')
+    email = models.EmailField()
+    phone = models.CharField(max_length=20, blank=True)
+    first_name = models.CharField(max_length=150, blank=True)
+    last_name = models.CharField(max_length=150, blank=True)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    rent_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    invited_by = models.ForeignKey(
+        CustomUser, on_delete=models.CASCADE, related_name='sent_tenant_invitations'
+    )
+    token_hash = models.CharField(max_length=64)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    accepted_user = models.ForeignKey(
+        CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name='accepted_tenant_invitations'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['unit', 'email'],
+                condition=models.Q(status='pending'),
+                name='property_tenantinvitation_unit_email_pending_uniq',
+            ),
+        ]
+
+    def __str__(self):
+        return f"TenantInvitation({self.email} → {self.unit})"

@@ -1,5 +1,17 @@
 from rest_framework import serializers
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview, SavedSearch
+from .models import (
+    Property,
+    Unit,
+    PropertyImage,
+    Lease,
+    PropertyAgent,
+    TenantApplication,
+    LeaseDocument,
+    PropertyReview,
+    TenantReview,
+    SavedSearch,
+    TenantInvitation,
+)
 
 
 class PropertySerializer(serializers.ModelSerializer):
@@ -91,3 +103,47 @@ class SavedSearchSerializer(serializers.ModelSerializer):
         model = SavedSearch
         fields = ['id', 'name', 'filters', 'notify_on_match', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class TenantInvitationCreateSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    phone = serializers.CharField(required=False, allow_blank=True, default='')
+    first_name = serializers.CharField(required=False, allow_blank=True, default='')
+    last_name = serializers.CharField(required=False, allow_blank=True, default='')
+    start_date = serializers.DateField()
+    end_date = serializers.DateField(required=False, allow_null=True)
+    rent_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class TenantInvitationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TenantInvitation
+        fields = [
+            'id',
+            'unit',
+            'email',
+            'phone',
+            'first_name',
+            'last_name',
+            'start_date',
+            'end_date',
+            'rent_amount',
+            'invited_by',
+            'status',
+            'expires_at',
+            'accepted_at',
+            'accepted_user',
+            'created_at',
+        ]
+        read_only_fields = fields
+
+
+class TenantInvitationAcceptSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    first_name = serializers.CharField(required=False, allow_blank=True, default='')
+    last_name = serializers.CharField(required=False, allow_blank=True, default='')
+    phone = serializers.CharField(required=False, allow_blank=True, default='')
+    national_id = serializers.CharField(required=False, allow_blank=True, default='')
+    emergency_contact_name = serializers.CharField(required=False, allow_blank=True, default='')
+    emergency_contact_phone = serializers.CharField(required=False, allow_blank=True, default='')

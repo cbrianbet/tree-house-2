@@ -1,7 +1,9 @@
 import math
 from datetime import date, timedelta
 from decimal import Decimal
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -9,13 +11,36 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
-from .models import Property, Unit, PropertyImage, Lease, PropertyAgent, TenantApplication, LeaseDocument, PropertyReview, TenantReview, SavedSearch
+from .models import (
+    Property,
+    Unit,
+    PropertyImage,
+    Lease,
+    PropertyAgent,
+    TenantApplication,
+    LeaseDocument,
+    PropertyReview,
+    TenantReview,
+    SavedSearch,
+    TenantInvitation,
+)
 from .serializers import (
     PropertySerializer, UnitSerializer, PropertyImageSerializer,
     LeaseSerializer, PropertyAgentSerializer, TenantApplicationSerializer,
     LeaseDocumentSerializer, PropertyReviewSerializer, TenantReviewSerializer,
     SavedSearchSerializer,
+    TenantInvitationSerializer,
+    TenantInvitationCreateSerializer,
+    TenantInvitationAcceptSerializer,
 )
+from .tenant_invite import (
+    hash_invite_token,
+    new_invite_token,
+    send_tenant_invitation_email,
+    send_existing_tenant_lease_email,
+)
+from authentication.models import Role, TenantProfile, CustomUser
+from rest_framework.authtoken.models import Token
 
 
 def is_landlord(user):
@@ -1113,3 +1138,298 @@ def saved_search_detail(request, pk):
 
     search.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── Tenant invitations (landlord/agent → new tenant onboarding) ─────────────
+
+
+def _can_manage_unit_invite(user, unit):
+    return is_admin(user) or unit.property.owner == user or is_agent_for(user, unit.property)
+
+
+def _unit_lease_block_reason(unit):
+    if unit.is_occupied:
+        return 'Unit is already occupied.'
+    if Lease.objects.filter(unit=unit).exists():
+        return 'This unit already has a lease.'
+    return None
+
+
+@extend_schema(methods=['GET'], summary="List tenant invitations for a unit")
+@extend_schema(
+    methods=['POST'],
+    summary="Invite a tenant by email (or create lease if tenant already exists)",
+    examples=[
+        OpenApiExample(
+            "Invite new tenant",
+            request_only=True,
+            value={
+                "email": "newtenant@example.com",
+                "phone": "+254712345678",
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "start_date": "2026-05-01",
+                "end_date": "2027-04-30",
+                "rent_amount": "35000.00",
+            },
+        ),
+    ],
+)
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def tenant_invitation_list_create(request, unit_id):
+    try:
+        unit = Unit.objects.select_related('property').get(pk=unit_id)
+    except Unit.DoesNotExist:
+        return Response({'detail': 'Unit not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _can_manage_unit_invite(request.user, unit):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == 'GET':
+        qs = TenantInvitation.objects.filter(unit=unit).select_related('invited_by', 'accepted_user')
+        return Response(TenantInvitationSerializer(qs, many=True).data)
+
+    ser = TenantInvitationCreateSerializer(data=request.data)
+    if not ser.is_valid():
+        return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    block = _unit_lease_block_reason(unit)
+    if block:
+        return Response({'detail': block}, status=status.HTTP_400_BAD_REQUEST)
+
+    email = ser.validated_data['email'].strip().lower()
+    start_date = ser.validated_data['start_date']
+    end_date = ser.validated_data.get('end_date')
+    rent_amount = ser.validated_data['rent_amount']
+
+    existing = CustomUser.objects.filter(email__iexact=email).select_related('role').first()
+    if existing:
+        if not existing.role or existing.role.name != Role.TENANT:
+            return Response(
+                {'detail': 'This email belongs to an account that is not a tenant.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            Lease.objects.create(
+                unit=unit,
+                tenant=existing,
+                start_date=start_date,
+                end_date=end_date,
+                rent_amount=rent_amount,
+            )
+            unit.is_occupied = True
+            unit.save()
+        except IntegrityError:
+            return Response({'detail': 'Could not create lease.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from notifications.utils import create_notification
+
+        create_notification(
+            existing,
+            'lease',
+            'New lease',
+            f'You have a new lease for {unit.name} at {unit.property.name}.',
+            action_url='',
+        )
+        send_existing_tenant_lease_email(existing.email, unit.property.name, unit.name)
+        lease = Lease.objects.get(unit=unit)
+        return Response(
+            {
+                'lease_created': True,
+                'lease': LeaseSerializer(lease).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    raw_token = new_invite_token()
+    token_hash = hash_invite_token(raw_token)
+    expires_at = timezone.now() + timedelta(days=14)
+
+    try:
+        inv = TenantInvitation.objects.create(
+            unit=unit,
+            email=email,
+            phone=ser.validated_data.get('phone') or '',
+            first_name=ser.validated_data.get('first_name') or '',
+            last_name=ser.validated_data.get('last_name') or '',
+            start_date=start_date,
+            end_date=end_date,
+            rent_amount=rent_amount,
+            invited_by=request.user,
+            token_hash=token_hash,
+            status='pending',
+            expires_at=expires_at,
+        )
+    except IntegrityError:
+        return Response(
+            {'detail': 'A pending invitation already exists for this email on this unit.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    send_tenant_invitation_email(email, raw_token, unit.property.name, unit.name)
+    out = TenantInvitationSerializer(inv).data
+    out['invite_token'] = raw_token
+    return Response(out, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(
+    methods=['POST'],
+    summary="Resend tenant invitation email (new token)",
+    examples=[OpenApiExample('Resend', request_only=True, value={})],
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def tenant_invitation_resend(request, pk):
+    try:
+        inv = TenantInvitation.objects.select_related('unit__property').get(pk=pk)
+    except TenantInvitation.DoesNotExist:
+        return Response({'detail': 'Invitation not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not _can_manage_unit_invite(request.user, inv.unit):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if inv.status != 'pending':
+        return Response({'detail': 'Only pending invitations can be resent.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if timezone.now() > inv.expires_at:
+        inv.status = 'expired'
+        inv.save()
+        return Response({'detail': 'Invitation has expired. Create a new invitation.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    block = _unit_lease_block_reason(inv.unit)
+    if block:
+        return Response({'detail': block}, status=status.HTTP_400_BAD_REQUEST)
+
+    raw_token = new_invite_token()
+    inv.token_hash = hash_invite_token(raw_token)
+    inv.expires_at = timezone.now() + timedelta(days=14)
+    inv.save(update_fields=['token_hash', 'expires_at'])
+
+    send_tenant_invitation_email(inv.email, raw_token, inv.unit.property.name, inv.unit.name)
+    out = TenantInvitationSerializer(inv).data
+    out['invite_token'] = raw_token
+    return Response(out, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    methods=['POST'],
+    summary="Accept tenant invitation — set password, profile, create lease",
+    examples=[
+        OpenApiExample(
+            'Accept invite',
+            request_only=True,
+            value={
+                'token': '<token-from-email>',
+                'password': 'StrongPass!123',
+                'first_name': 'Jane',
+                'last_name': 'Doe',
+                'phone': '+254712345678',
+                'national_id': 'ID123',
+                'emergency_contact_name': 'John Doe',
+                'emergency_contact_phone': '+254700000000',
+            },
+        ),
+    ],
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def tenant_invitation_accept(request):
+    ser = TenantInvitationAcceptSerializer(data=request.data)
+    if not ser.is_valid():
+        return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    raw_token = ser.validated_data['token']
+    token_hash = hash_invite_token(raw_token)
+    try:
+        inv = TenantInvitation.objects.select_related('unit__property').get(
+            token_hash=token_hash,
+            status='pending',
+        )
+    except TenantInvitation.DoesNotExist:
+        return Response({'detail': 'Invalid or expired invitation.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if timezone.now() > inv.expires_at:
+        inv.status = 'expired'
+        inv.save(update_fields=['status'])
+        return Response({'detail': 'This invitation has expired.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    unit = inv.unit
+    block = _unit_lease_block_reason(unit)
+    if block:
+        return Response({'detail': block}, status=status.HTTP_400_BAD_REQUEST)
+
+    email = inv.email.strip().lower()
+    if CustomUser.objects.filter(email__iexact=email).exists():
+        return Response(
+            {'detail': 'An account with this email already exists. Log in instead.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    tenant_role = Role.objects.get(name=Role.TENANT)
+    username = email
+    if len(username) > 150:
+        username = username[:150]
+
+    user = CustomUser(
+        username=username,
+        email=email,
+        first_name=ser.validated_data.get('first_name') or inv.first_name or '',
+        last_name=ser.validated_data.get('last_name') or inv.last_name or '',
+        phone=ser.validated_data.get('phone') or inv.phone or '',
+        role=tenant_role,
+    )
+    pwd = ser.validated_data['password']
+    try:
+        validate_password(pwd, user)
+    except DjangoValidationError as e:
+        return Response({'detail': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.set_password(pwd)
+
+    try:
+        with transaction.atomic():
+            user.save()
+            TenantProfile.objects.create(
+                user=user,
+                national_id=ser.validated_data.get('national_id') or '',
+                emergency_contact_name=ser.validated_data.get('emergency_contact_name') or '',
+                emergency_contact_phone=ser.validated_data.get('emergency_contact_phone') or '',
+            )
+            Lease.objects.create(
+                unit=unit,
+                tenant=user,
+                start_date=inv.start_date,
+                end_date=inv.end_date,
+                rent_amount=inv.rent_amount,
+            )
+            unit.is_occupied = True
+            unit.save(update_fields=['is_occupied'])
+            inv.status = 'accepted'
+            inv.accepted_at = timezone.now()
+            inv.accepted_user = user
+            inv.save(update_fields=['status', 'accepted_at', 'accepted_user'])
+            token, _ = Token.objects.get_or_create(user=user)
+    except IntegrityError:
+        return Response({'detail': 'Could not complete registration.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        from allauth.account.models import EmailAddress
+
+        EmailAddress.objects.update_or_create(
+            user=user,
+            email=email,
+            defaults={'verified': True, 'primary': True},
+        )
+    except Exception:
+        pass
+
+    from authentication.serializers import CustomUserDetailsSerializer
+
+    return Response(
+        {
+            'key': token.key,
+            'user': CustomUserDetailsSerializer(user).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
