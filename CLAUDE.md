@@ -439,6 +439,7 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - `Expense` records are auto-created when a maintenance request transitions to `completed` — the accepted bid's `proposed_price` becomes the expense amount with `category='maintenance'`
 - Report income = rent payments received + additional income entries; expenses = Expense records; net = income − expenses
 - Annual report: `?year=2024`; monthly report: `?year=2024&month=3`
+- JSON includes `occupancy` (monthly only), `occupancy_series` (one or twelve months), and `occupancy_avg_pct` — lease/date overlap vs non-deleted units (`billing/views.py`)
 
 ### Tenant Applications
 - Only Tenants can submit applications; only the property owner or admin can approve/reject; only the applicant can withdraw

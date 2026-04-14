@@ -1312,7 +1312,21 @@ Accessible by: owner, assigned agent, admin. Tenants do not have access.
     "overdue": 0,
     "partial": 0,
     "cancelled": 0
-  }
+  },
+  "occupancy": {
+    "occupied_units": 8,
+    "total_units": 10,
+    "occupancy_pct": "80.00"
+  },
+  "occupancy_series": [
+    {
+      "period": "2024-03",
+      "occupied_units": 8,
+      "total_units": 10,
+      "occupancy_pct": "80.00"
+    }
+  ],
+  "occupancy_avg_pct": "80.00"
 }
 ```
 
@@ -1322,6 +1336,10 @@ Accessible by: owner, assigned agent, admin. Tenants do not have access.
 - `additional_income` — sum of additional income entries by `date`
 - `total_income` = `total_collected` + `additional_income`
 - `net_income` = `total_income` − `expenses.total`
+- **Occupancy** — physical units on the property (`deleted_at` is null). A unit counts as occupied for a calendar month if it has a lease whose dates overlap that month (`start_date` ≤ last day of month, and `end_date` is null or ≥ first day of month). `occupancy_pct` is `occupied_units / total_units × 100` with two decimal places, or `null` when `total_units` is 0.
+- **`occupancy`** — present for **monthly** reports (`year` + `month`); snapshot for that month only. For **annual** reports (`year` only), this field is `null` (use `occupancy_series` + `occupancy_avg_pct`).
+- **`occupancy_series`** — monthly breakdown: one object when `month` is set; twelve objects (`YYYY-01` … `YYYY-12`) when only `year` is set.
+- **`occupancy_avg_pct`** — for a monthly request, same as that month’s `occupancy.occupancy_pct`. For an annual request, the simple mean of the twelve monthly percentages (months with `total_units = 0` are skipped); `null` if every month had no units.
 
 ---
 
