@@ -427,3 +427,32 @@ class MeNotificationsTests(APITestCase):
         self.client.credentials()
         response = self.client.get(reverse('me-notifications'))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class UserProfileLookupTests(APITestCase):
+    def setUp(self):
+        self.requesting_user, self.requesting_token = make_user('requester', 'Tenant')
+        self.lookup_user, _ = make_user('lookuptarget', 'Landlord')
+        self.lookup_user.first_name = 'Jane'
+        self.lookup_user.last_name = 'Doe'
+        self.lookup_user.phone = '0701234567'
+        self.lookup_user.save()
+
+    def test_authenticated_user_can_lookup_profile(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.requesting_token.key}')
+        response = self.client.get(reverse('user-profile-lookup', args=[self.lookup_user.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], self.lookup_user.id)
+        self.assertEqual(response.data['first_name'], 'Jane')
+        self.assertEqual(response.data['last_name'], 'Doe')
+        self.assertEqual(response.data['phone'], '0701234567')
+        self.assertEqual(response.data['role'], 'Landlord')
+
+    def test_lookup_returns_404_for_missing_user(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.requesting_token.key}')
+        response = self.client.get(reverse('user-profile-lookup', args=[999999]))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unauthenticated_lookup_returns_401(self):
+        response = self.client.get(reverse('user-profile-lookup', args=[self.lookup_user.id]))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

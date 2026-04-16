@@ -20,7 +20,7 @@ from .views import (
     agent_profile_list, agent_profile_detail,
     artisan_profile_list, artisan_profile_detail,
     moving_company_profile_list, moving_company_profile_detail,
-    me_account, me_profile, me_notifications,
+    me_account, me_profile, me_notifications, user_profile_lookup,
 )
 
 _register_view = extend_schema(
@@ -124,5 +124,6 @@ urlpatterns = [
     path('me/', me_account, name='me-account'),
     path('me/profile/', me_profile, name='me-profile'),
     path('me/notifications/', me_notifications, name='me-notifications'),
+    path('users/<int:pk>/profile/', user_profile_lookup, name='user-profile-lookup'),
     path('password/change/', PasswordChangeView.as_view(), name='rest_password_change'),
 ]

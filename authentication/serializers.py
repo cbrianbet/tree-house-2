@@ -90,6 +90,17 @@ class AccountUpdateSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'role']
 
 
+class UserProfileLookupSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomUser
+        fields = ['id', 'first_name', 'last_name', 'phone', 'role']
+
+    def get_role(self, obj):
+        return obj.role.name if obj.role else None
+
+
 class NotificationPreferenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationPreference

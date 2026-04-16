@@ -10,7 +10,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample
 from .serializers import (
     RoleSerializer, TenantProfileSerializer, LandlordProfileSerializer,
     AgentProfileSerializer, ArtisanProfileSerializer, MovingCompanyProfileSerializer,
-    AccountUpdateSerializer, NotificationPreferenceSerializer,
+    AccountUpdateSerializer, NotificationPreferenceSerializer, UserProfileLookupSerializer,
 )
 from .models import Role, TenantProfile, LandlordProfile, AgentProfile, ArtisanProfile, NotificationPreference, CustomUser, MovingCompanyProfile
 
@@ -97,6 +97,20 @@ def role_detail(request, pk):
     elif request.method == 'DELETE':
         role.delete()
         return Response({'deleted': True}, status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(
+    methods=['GET'],
+    summary="Get lightweight user profile by id",
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_profile_lookup(request, pk):
+    try:
+        user = CustomUser.objects.select_related('role').get(pk=pk)
+    except CustomUser.DoesNotExist:
+        return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+    return Response(UserProfileLookupSerializer(user).data)
 
 
 def _profile_list_view(model, serializer_class):
