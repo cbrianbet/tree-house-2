@@ -1,5 +1,5 @@
 import calendar
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
 
@@ -23,7 +23,10 @@ from billing.models import (
     Expense,
     PropertyBillingNotificationSettings,
 )
-from billing.utils import generate_receipt_number
+from billing.utils import generate_receipt_number, generate_invoice_number
+from billing.serializers import ReceiptSerializer
+from billing.views import _receipt_base_queryset
+from billing.pagination import ReceiptListPagination
 
 User = get_user_model()
 
@@ -573,7 +576,9 @@ class ReceiptTests(APITestCase):
         self.auth(self.tenant_token)
         response = self.client.get(reverse('receipt-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertIn('results', response.data)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(len(response.data['results']), 1)
 
     def test_tenant_can_retrieve_receipt(self):
         self.auth(self.tenant_token)
@@ -585,7 +590,8 @@ class ReceiptTests(APITestCase):
         self.auth(self.landlord_token)
         response = self.client.get(reverse('receipt-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(len(response.data['results']), 1)
 
 
 class ReceiptNumberTests(APITestCase):
@@ -1256,3 +1262,820 @@ class MaintenanceExpenseAutoCreateTests(APITestCase):
             {'status': 'completed'}
         )
         self.assertFalse(Expense.objects.filter(maintenance_request=self.req).exists())
+
+
+class InvoiceNumberGenerationTests(APITestCase):
+    def test_generate_invoice_number_format(self):
+        self.assertEqual(generate_invoice_number(1), 'INV-0001')
+        self.assertEqual(generate_invoice_number(35), 'INV-0035')
+        self.assertEqual(generate_invoice_number(99999), 'INV-99999')
+
+    def test_invoice_number_auto_assigned_on_create(self):
+        landlord, _ = make_user('landlord_inv', 'Landlord')
+        tenant, _ = make_user('tenant_inv', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.invoice_number, f'INV-{invoice.pk:04d}')
+
+    def test_invoice_number_unique(self):
+        landlord, _ = make_user('landlord_inv2', 'Landlord')
+        tenant, _ = make_user('tenant_inv2', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+
+        inv1 = make_invoice(lease)
+        inv1.refresh_from_db()
+
+        unit2 = make_unit(prop, landlord)
+        lease2 = Lease.objects.create(
+            unit=unit2, tenant=tenant, start_date=date.today(),
+            rent_amount='45000', is_active=True,
+        )
+        inv2 = make_invoice(lease2)
+        inv2.refresh_from_db()
+
+        self.assertNotEqual(inv1.invoice_number, inv2.invoice_number)
+
+    def test_invoice_number_in_api_response(self):
+        landlord, landlord_token = make_user('landlord_inv3', 'Landlord')
+        tenant, tenant_token = make_user('tenant_inv3', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {tenant_token.key}')
+        response = self.client.get(reverse('invoice-detail', args=[invoice.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('invoice_number', response.data)
+        self.assertTrue(response.data['invoice_number'].startswith('INV-'))
+
+    def test_invoice_number_not_overwritten_on_update(self):
+        landlord, _ = make_user('landlord_inv4', 'Landlord')
+        tenant, _ = make_user('tenant_inv4', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+        invoice.refresh_from_db()
+        original_number = invoice.invoice_number
+        invoice.status = 'overdue'
+        invoice.save()
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.invoice_number, original_number)
+
+
+class PaymentMethodChoicesTests(APITestCase):
+    def test_valid_payment_method_choices(self):
+        valid = ['mpesa', 'bank', 'card', 'cash', 'other']
+        for method in valid:
+            self.assertIn(method, dict(Payment.PAYMENT_METHOD_CHOICES))
+
+    def test_payment_method_default_is_other(self):
+        landlord, _ = make_user('landlord_pm', 'Landlord')
+        tenant, _ = make_user('tenant_pm', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+        payment = Payment.objects.create(
+            invoice=invoice,
+            amount=Decimal('1000'),
+            stripe_payment_intent_id='pi_pm_test',
+            status='completed',
+            paid_at=timezone.now(),
+        )
+        self.assertEqual(payment.payment_method, 'other')
+
+    def test_payment_method_in_api_response(self):
+        landlord, landlord_token = make_user('landlord_pm2', 'Landlord')
+        tenant, tenant_token = make_user('tenant_pm2', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease, status='paid')
+        Payment.objects.create(
+            invoice=invoice,
+            amount=Decimal('45000'),
+            stripe_payment_intent_id='pi_pm_api',
+            payment_method='card',
+            transaction_reference='ch_abc123',
+            status='completed',
+            paid_at=timezone.now(),
+        )
+        Receipt.objects.create(
+            payment=Payment.objects.get(stripe_payment_intent_id='pi_pm_api'),
+            receipt_number='RCP-202604-9999',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {tenant_token.key}')
+        response = self.client.get(reverse('receipt-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('results', response.data)
+
+    def test_transaction_reference_stored(self):
+        landlord, _ = make_user('landlord_tr', 'Landlord')
+        tenant, _ = make_user('tenant_tr', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+        payment = Payment.objects.create(
+            invoice=invoice,
+            amount=Decimal('1000'),
+            stripe_payment_intent_id='pi_tr_test',
+            transaction_reference='TXN-ABC-123',
+            status='completed',
+            paid_at=timezone.now(),
+        )
+        payment.refresh_from_db()
+        self.assertEqual(payment.transaction_reference, 'TXN-ABC-123')
+
+
+class BackfillLogicTests(APITestCase):
+    """Tests that verify the backfill data migration logic (run as Python functions)."""
+
+    def test_backfill_payment_card_from_stripe(self):
+        landlord, _ = make_user('landlord_bf1', 'Landlord')
+        tenant, _ = make_user('tenant_bf1', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+
+        payment = Payment.objects.create(
+            invoice=invoice,
+            amount=Decimal('45000'),
+            stripe_payment_intent_id='pi_real_stripe',
+            stripe_charge_id='ch_real_stripe',
+            status='completed',
+            paid_at=timezone.now(),
+        )
+        self._run_payment_backfill(payment)
+        payment.refresh_from_db()
+        self.assertEqual(payment.payment_method, 'card')
+        self.assertEqual(payment.transaction_reference, 'ch_real_stripe')
+
+    def test_backfill_payment_manual_stays_other(self):
+        landlord, _ = make_user('landlord_bf2', 'Landlord')
+        tenant, _ = make_user('tenant_bf2', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+
+        payment = Payment.objects.create(
+            invoice=invoice,
+            amount=Decimal('45000'),
+            stripe_payment_intent_id='manual-abc-123',
+            status='completed',
+            paid_at=timezone.now(),
+        )
+        self._run_payment_backfill(payment)
+        payment.refresh_from_db()
+        self.assertEqual(payment.payment_method, 'other')
+        self.assertFalse(payment.transaction_reference)
+
+    def test_backfill_invoice_number(self):
+        landlord, _ = make_user('landlord_bf3', 'Landlord')
+        tenant, _ = make_user('tenant_bf3', 'Tenant')
+        prop = make_property(landlord)
+        unit = make_unit(prop, landlord)
+        lease = make_lease(unit, tenant)
+        invoice = make_invoice(lease)
+        invoice.refresh_from_db()
+        self.assertTrue(invoice.invoice_number.startswith('INV-'))
+        self.assertEqual(invoice.invoice_number, f'INV-{invoice.pk:04d}')
+
+    @staticmethod
+    def _run_payment_backfill(payment):
+        """Simulate the backfill logic from the data migration."""
+        changed = False
+        if not payment.transaction_reference and payment.stripe_charge_id:
+            payment.transaction_reference = payment.stripe_charge_id
+            changed = True
+        if payment.payment_method == 'other':
+            if payment.stripe_payment_intent_id and not payment.stripe_payment_intent_id.startswith('manual-'):
+                payment.payment_method = 'card'
+                changed = True
+            elif payment.stripe_charge_id:
+                payment.payment_method = 'card'
+                changed = True
+        if changed:
+            payment.save(update_fields=['payment_method', 'transaction_reference'])
+
+
+class ReceiptEnrichmentTests(APITestCase):
+    """Flattened receipt payload for receipts UI (list + detail)."""
+
+    _EXPECTED_KEYS = frozenset({
+        'id', 'payment', 'receipt_number', 'issued_at',
+        'amount', 'payment_status', 'paid_at', 'payment_method',
+        'transaction_ref', 'transaction_reference',
+        'invoice_id', 'invoice_number', 'invoice_status',
+        'invoice_period_start', 'invoice_period_end',
+        'tenant_id', 'tenant_name', 'tenant_email',
+        'unit_id', 'unit_name', 'property_id', 'property_name',
+        'charge_type',
+    })
+
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord_rec_en', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant_rec_en', 'Tenant')
+        self.tenant.first_name = 'Jane'
+        self.tenant.last_name = 'Doe'
+        self.tenant.email = 'jane.rec@example.com'
+        self.tenant.save()
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.lease = make_lease(self.unit, self.tenant)
+        self.invoice = make_invoice(self.lease, status='paid')
+        self.invoice.refresh_from_db()
+
+        self.payment = Payment.objects.create(
+            invoice=self.invoice,
+            amount=Decimal('45000.00'),
+            stripe_payment_intent_id='pi_enrich_1',
+            stripe_charge_id='ch_enrich_1',
+            payment_method='card',
+            transaction_reference='',
+            status='completed',
+            paid_at=timezone.now(),
+        )
+        self.receipt = Receipt.objects.create(
+            payment=self.payment,
+            receipt_number='RCP-ENRICH-0001',
+        )
+
+    def test_receipt_detail_includes_all_flat_fields(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get(reverse('receipt-detail', args=[self.receipt.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._EXPECTED_KEYS, set(response.data.keys()))
+        self.assertEqual(response.data['payment'], self.payment.id)
+        self.assertEqual(response.data['amount'], '45000.00')
+        self.assertEqual(response.data['payment_status'], 'completed')
+        self.assertEqual(response.data['payment_method'], 'card')
+        self.assertEqual(response.data['transaction_ref'], 'ch_enrich_1')
+        self.assertEqual(response.data['transaction_reference'], 'ch_enrich_1')
+        self.assertEqual(response.data['invoice_id'], self.invoice.id)
+        self.assertEqual(response.data['invoice_number'], self.invoice.invoice_number)
+        self.assertEqual(response.data['invoice_status'], 'paid')
+        self.assertEqual(response.data['tenant_id'], self.tenant.id)
+        self.assertEqual(response.data['tenant_name'], 'Jane Doe')
+        self.assertEqual(response.data['tenant_email'], 'jane.rec@example.com')
+        self.assertEqual(response.data['unit_id'], self.unit.id)
+        self.assertEqual(response.data['unit_name'], self.unit.name)
+        self.assertEqual(response.data['property_id'], self.prop.id)
+        self.assertEqual(response.data['property_name'], self.prop.name)
+        self.assertEqual(response.data['charge_type'], 'Rent')
+
+    def test_transaction_ref_prefers_transaction_reference(self):
+        self.payment.transaction_reference = 'TXN-PREF-99'
+        self.payment.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get(reverse('receipt-detail', args=[self.receipt.id]))
+        self.assertEqual(response.data['transaction_ref'], 'TXN-PREF-99')
+        self.assertEqual(response.data['transaction_reference'], 'TXN-PREF-99')
+
+    def test_tenant_name_falls_back_to_username(self):
+        self.tenant.first_name = ''
+        self.tenant.last_name = ''
+        self.tenant.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get(reverse('receipt-detail', args=[self.receipt.id]))
+        self.assertEqual(response.data['tenant_name'], self.tenant.username)
+
+    def test_charge_type_rent_plus_service_when_additional_income_in_period(self):
+        ct = ChargeType.objects.create(property=self.prop, name='Water', created_by=self.landlord)
+        AdditionalIncome.objects.create(
+            unit=self.unit,
+            charge_type=ct,
+            amount=Decimal('500.00'),
+            date=self.invoice.period_start,
+            recorded_by=self.landlord,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get(reverse('receipt-detail', args=[self.receipt.id]))
+        self.assertEqual(response.data['charge_type'], 'Rent + Service')
+
+    def test_receipt_list_row_matches_detail_shape(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get(reverse('receipt-list'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(self._EXPECTED_KEYS, set(response.data['results'][0].keys()))
+        self.assertEqual(response.data['results'][0]['receipt_number'], 'RCP-ENRICH-0001')
+
+    def test_receipt_list_serializes_without_n_plus_one(self):
+        def make_extra_receipt(month: int, seq: int):
+            unit = make_unit(self.prop, self.landlord)
+            lease = Lease.objects.create(
+                unit=unit,
+                tenant=self.tenant,
+                start_date=date(2026, 1, 1),
+                rent_amount='45000',
+                is_active=True,
+            )
+            inv = Invoice.objects.create(
+                lease=lease,
+                period_start=date(2026, month, 1),
+                period_end=date(2026, month, 28),
+                due_date=date(2026, month, 5),
+                rent_amount=Decimal('45000'),
+                late_fee_amount=Decimal('0'),
+                total_amount=Decimal('45000'),
+                status='paid',
+            )
+            inv.refresh_from_db()
+            pay = Payment.objects.create(
+                invoice=inv,
+                amount=Decimal('45000'),
+                stripe_payment_intent_id=f'pi_enrich_{seq}',
+                status='completed',
+                paid_at=timezone.now(),
+            )
+            return Receipt.objects.create(payment=pay, receipt_number=f'RCP-ENRICH-{seq:04d}')
+
+        for m, seq in zip(range(2, 6), range(2, 6)):
+            make_extra_receipt(m, seq)
+
+        qs = _receipt_base_queryset().filter(
+            payment__invoice__lease__tenant=self.tenant,
+        ).order_by('id')
+        with self.assertNumQueries(1):
+            rows = list(qs)
+        self.assertEqual(len(rows), 5)
+        with self.assertNumQueries(0):
+            payload = ReceiptSerializer(rows, many=True).data
+        self.assertEqual(len(payload), 5)
+        for row in payload:
+            self.assertEqual(self._EXPECTED_KEYS, set(row.keys()))
+
+
+_RECEIPT_FILTER_DEFAULT_PAID_AT = object()
+
+
+class ReceiptListFilterPaginationTests(APITestCase):
+    """GET /api/billing/receipts/ query params, search, and DRF-style pagination."""
+
+    def _create_receipt(
+        self,
+        landlord,
+        tenant,
+        prop,
+        *,
+        period_month,
+        stripe_suffix,
+        payment_method='card',
+        paid_at=_RECEIPT_FILTER_DEFAULT_PAID_AT,
+        receipt_number=None,
+        unit=None,
+        transaction_reference='',
+    ):
+        if unit is None:
+            unit = make_unit(prop, landlord)
+        lease = Lease.objects.create(
+            unit=unit,
+            tenant=tenant,
+            start_date=date(2026, 1, 1),
+            rent_amount='1000',
+            is_active=True,
+        )
+        inv = Invoice.objects.create(
+            lease=lease,
+            period_start=date(2026, period_month, 1),
+            period_end=date(2026, period_month, 28),
+            due_date=date(2026, period_month, 5),
+            rent_amount=Decimal('1000'),
+            late_fee_amount=Decimal('0'),
+            total_amount=Decimal('1000'),
+            status='paid',
+        )
+        inv.refresh_from_db()
+        if paid_at is _RECEIPT_FILTER_DEFAULT_PAID_AT:
+            paid_at = timezone.make_aware(datetime(2026, period_month, 15, 12, 0, 0))
+        pay = Payment.objects.create(
+            invoice=inv,
+            amount=Decimal('1000'),
+            stripe_payment_intent_id=f'pi_filt_{stripe_suffix}',
+            payment_method=payment_method,
+            transaction_reference=transaction_reference or '',
+            status='completed',
+            paid_at=paid_at,
+        )
+        rn = receipt_number or f'RCP-FILT-{stripe_suffix}'
+        return Receipt.objects.create(payment=pay, receipt_number=rn)
+
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord_rf', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant_rf', 'Tenant')
+        self.tenant.email = 'renter_rf@example.com'
+        self.tenant.first_name = 'Pat'
+        self.tenant.last_name = 'Customer'
+        self.tenant.save()
+        self.prop_a = make_property(self.landlord)
+        self.prop_a.name = 'Alpha Plaza'
+        self.prop_a.save()
+        self.prop_b = make_property(self.landlord)
+        self.prop_b.name = 'Beta Tower'
+        self.prop_b.save()
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_invalid_month_returns_400(self):
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'month': '2026-13'})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('month', r.data)
+        r2 = self.client.get(reverse('receipt-list'), {'month': 'not-a-month'})
+        self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_method_returns_400(self):
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'method': 'bitcoin'})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('method', r.data)
+
+    def test_invalid_property_returns_400(self):
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'property': 'x'})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('property', r.data)
+
+    def test_filter_by_property(self):
+        self._create_receipt(self.landlord, self.tenant, self.prop_a, period_month=4, stripe_suffix='a1')
+        self._create_receipt(self.landlord, self.tenant, self.prop_b, period_month=4, stripe_suffix='b1')
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'property': self.prop_a.id})
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['count'], 1)
+        self.assertEqual(r.data['results'][0]['property_id'], self.prop_a.id)
+
+    def test_filter_by_method(self):
+        self._create_receipt(
+            self.landlord, self.tenant, self.prop_a, period_month=3, stripe_suffix='c', payment_method='cash',
+        )
+        self._create_receipt(
+            self.landlord, self.tenant, self.prop_a, period_month=3, stripe_suffix='d', payment_method='card',
+        )
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'method': 'cash'})
+        self.assertEqual(r.data['count'], 1)
+        self.assertEqual(r.data['results'][0]['payment_method'], 'cash')
+
+    def test_filter_by_month_uses_paid_at(self):
+        self._create_receipt(
+            self.landlord,
+            self.tenant,
+            self.prop_a,
+            period_month=5,
+            stripe_suffix='e',
+            paid_at=timezone.make_aware(datetime(2026, 6, 10, 12, 0, 0)),
+        )
+        self.auth(self.landlord_token)
+        r_june = self.client.get(reverse('receipt-list'), {'month': '2026-06'})
+        self.assertEqual(r_june.data['count'], 1)
+        r_may = self.client.get(reverse('receipt-list'), {'month': '2026-05'})
+        self.assertEqual(r_may.data['count'], 0)
+
+    def test_filter_by_month_falls_back_to_issued_at_when_no_paid_at(self):
+        rec = self._create_receipt(
+            self.landlord,
+            self.tenant,
+            self.prop_a,
+            period_month=4,
+            stripe_suffix='f',
+            paid_at=None,
+        )
+        issued = timezone.make_aware(datetime(2026, 7, 8, 9, 0, 0))
+        Receipt.objects.filter(pk=rec.pk).update(issued_at=issued)
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'month': '2026-07'})
+        self.assertEqual(r.data['count'], 1)
+        self.assertEqual(r.data['results'][0]['id'], rec.id)
+
+    def test_search_receipt_number(self):
+        self._create_receipt(
+            self.landlord,
+            self.tenant,
+            self.prop_a,
+            period_month=4,
+            stripe_suffix='g',
+            receipt_number='RCP-UNIQUE-XYZ',
+        )
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'search': 'UNIQUE-XYZ'})
+        self.assertEqual(r.data['count'], 1)
+
+    def test_search_tenant_email(self):
+        self._create_receipt(self.landlord, self.tenant, self.prop_a, period_month=4, stripe_suffix='h')
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'search': 'renter_rf@'})
+        self.assertEqual(r.data['count'], 1)
+
+    def test_search_tenant_full_name_concat(self):
+        self._create_receipt(self.landlord, self.tenant, self.prop_a, period_month=4, stripe_suffix='h2')
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'search': 'pat cust'})
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['count'], 1)
+
+    def test_search_invoice_number(self):
+        rec = self._create_receipt(self.landlord, self.tenant, self.prop_a, period_month=4, stripe_suffix='i')
+        inv_num = rec.payment.invoice.invoice_number
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'search': inv_num})
+        self.assertEqual(r.data['count'], 1)
+
+    def test_search_transaction_reference(self):
+        self._create_receipt(
+            self.landlord,
+            self.tenant,
+            self.prop_a,
+            period_month=4,
+            stripe_suffix='j',
+            transaction_reference='MPESA-REF-999',
+        )
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'search': 'mpesa-ref'})
+        self.assertEqual(r.data['count'], 1)
+
+    def test_search_unit_name(self):
+        unit = make_unit(self.prop_a, self.landlord)
+        unit.name = 'Penthouse A'
+        unit.save()
+        self._create_receipt(
+            self.landlord, self.tenant, self.prop_a, period_month=4, stripe_suffix='k', unit=unit,
+        )
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'search': 'penthouse'})
+        self.assertEqual(r.data['count'], 1)
+
+    def test_combined_filters(self):
+        self._create_receipt(
+            self.landlord,
+            self.tenant,
+            self.prop_a,
+            period_month=4,
+            stripe_suffix='m1',
+            payment_method='mpesa',
+            paid_at=timezone.make_aware(datetime(2026, 4, 20, 12, 0, 0)),
+        )
+        self._create_receipt(
+            self.landlord,
+            self.tenant,
+            self.prop_a,
+            period_month=4,
+            stripe_suffix='m2',
+            payment_method='card',
+            paid_at=timezone.make_aware(datetime(2026, 4, 21, 12, 0, 0)),
+        )
+        self.auth(self.landlord_token)
+        r = self.client.get(
+            reverse('receipt-list'),
+            {'property': self.prop_a.id, 'method': 'mpesa', 'month': '2026-04'},
+        )
+        self.assertEqual(r.data['count'], 1)
+        self.assertEqual(r.data['results'][0]['payment_method'], 'mpesa')
+
+    def test_pagination_shape(self):
+        for n in range(15):
+            self._create_receipt(
+                self.landlord, self.tenant, self.prop_a, period_month=2, stripe_suffix=f'p{n}',
+            )
+        self.auth(self.landlord_token)
+        r = self.client.get(reverse('receipt-list'), {'page': 1, 'page_size': 10})
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['count'], 15)
+        self.assertEqual(len(r.data['results']), 10)
+        self.assertIsNotNone(r.data['next'])
+        r2 = self.client.get(reverse('receipt-list'), {'page': 2, 'page_size': 10})
+        self.assertEqual(len(r2.data['results']), 5)
+        self.assertIsNone(r2.data['next'])
+
+    def test_page_size_capped(self):
+        with patch.object(ReceiptListPagination, 'max_page_size', 5):
+            for n in range(12):
+                self._create_receipt(
+                    self.landlord, self.tenant, self.prop_a, period_month=3, stripe_suffix=f'cap{n}',
+                )
+            self.auth(self.landlord_token)
+            r = self.client.get(reverse('receipt-list'), {'page': 1, 'page_size': 500})
+            self.assertEqual(len(r.data['results']), 5)
+            self.assertEqual(r.data['count'], 12)
+
+    def test_tenant_other_property_filter_returns_empty(self):
+        other_landlord, _ = make_user('landlord_other_rf', 'Landlord')
+        other_prop = make_property(other_landlord)
+        self._create_receipt(self.landlord, self.tenant, self.prop_a, period_month=4, stripe_suffix='oz1')
+        self.auth(self.tenant_token)
+        r = self.client.get(reverse('receipt-list'), {'property': other_prop.id})
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['count'], 0)
+        self.assertEqual(len(r.data['results']), 0)
+
+
+class ReceiptStatsTests(APITestCase):
+    """GET /api/billing/receipts/stats/"""
+
+    def _pay_rec(
+        self,
+        landlord,
+        tenant,
+        prop,
+        *,
+        inv_month,
+        paid_dt,
+        amount,
+        method='card',
+        suffix='x',
+    ):
+        unit = make_unit(prop, landlord)
+        lease = Lease.objects.create(
+            unit=unit,
+            tenant=tenant,
+            start_date=date(2026, 1, 1),
+            rent_amount=str(amount),
+            is_active=True,
+        )
+        inv = Invoice.objects.create(
+            lease=lease,
+            period_start=date(2026, inv_month, 1),
+            period_end=date(2026, inv_month, 28),
+            due_date=date(2026, inv_month, 5),
+            rent_amount=Decimal(str(amount)),
+            late_fee_amount=Decimal('0'),
+            total_amount=Decimal(str(amount)),
+            status='paid',
+        )
+        inv.refresh_from_db()
+        pay = Payment.objects.create(
+            invoice=inv,
+            amount=Decimal(str(amount)),
+            stripe_payment_intent_id=f'pi_st_{suffix}_{amount}_{method}',
+            payment_method=method,
+            status='completed',
+            paid_at=paid_dt,
+        )
+        return Receipt.objects.create(payment=pay, receipt_number=f'RCP-ST-{suffix}-{pay.id}')
+
+    @patch('billing.receipt_stats.timezone.now')
+    def test_normal_dataset(self, mock_now):
+        mock_now.return_value = timezone.make_aware(datetime(2026, 4, 20, 12, 0, 0))
+        landlord, lt = make_user('landlord_st1', 'Landlord')
+        tenant, _ = make_user('tenant_st1', 'Tenant')
+        prop = make_property(landlord)
+        self._pay_rec(
+            landlord, tenant, prop, inv_month=3,
+            paid_dt=timezone.make_aware(datetime(2026, 3, 10, 12, 0, 0)),
+            amount='100', method='card', suffix='a',
+        )
+        self._pay_rec(
+            landlord, tenant, prop, inv_month=3,
+            paid_dt=timezone.make_aware(datetime(2026, 3, 11, 12, 0, 0)),
+            amount='200', method='card', suffix='b',
+        )
+        self._pay_rec(
+            landlord, tenant, prop, inv_month=3,
+            paid_dt=timezone.make_aware(datetime(2026, 3, 12, 12, 0, 0)),
+            amount='300', method='mpesa', suffix='c',
+        )
+        self._pay_rec(
+            landlord, tenant, prop, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 5, 12, 0, 0)),
+            amount='400', method='card', suffix='d',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {lt.key}')
+        r = self.client.get(reverse('receipt-stats'))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['total_count'], 4)
+        self.assertEqual(Decimal(r.data['average_amount']), Decimal('250.00'))
+        self.assertEqual(r.data['this_month_count'], 1)
+        self.assertEqual(Decimal(r.data['this_month_total']), Decimal('400.00'))
+        bd = r.data['method_breakdown']
+        self.assertAlmostEqual(bd['card'], 75.0, places=5)
+        self.assertAlmostEqual(bd['mpesa'], 25.0, places=5)
+        self.assertEqual(bd['bank'], 0.0)
+        self.assertEqual(bd['cash'], 0.0)
+        self.assertEqual(bd['other'], 0.0)
+
+    def test_empty_dataset(self):
+        landlord, lt = make_user('landlord_st_empty', 'Landlord')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {lt.key}')
+        r = self.client.get(reverse('receipt-stats'))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['total_count'], 0)
+        self.assertEqual(r.data['this_month_count'], 0)
+        self.assertEqual(r.data['this_month_total'], '0.00')
+        self.assertEqual(r.data['average_amount'], '0.00')
+        for k, v in r.data['method_breakdown'].items():
+            self.assertEqual(v, 0.0, k)
+
+    @patch('billing.receipt_stats.timezone.now')
+    def test_property_filter(self, mock_now):
+        mock_now.return_value = timezone.make_aware(datetime(2026, 4, 1, 12, 0, 0))
+        landlord, lt = make_user('landlord_st_pf', 'Landlord')
+        tenant, _ = make_user('tenant_st_pf', 'Tenant')
+        pa = make_property(landlord)
+        pb = make_property(landlord)
+        self._pay_rec(
+            landlord, tenant, pa, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 2, 12, 0, 0)),
+            amount='1000', suffix='p1',
+        )
+        self._pay_rec(
+            landlord, tenant, pa, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 3, 12, 0, 0)),
+            amount='2000', suffix='p2',
+        )
+        self._pay_rec(
+            landlord, tenant, pb, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 4, 12, 0, 0)),
+            amount='5000', suffix='p3',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {lt.key}')
+        r = self.client.get(reverse('receipt-stats'), {'property': pa.id})
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['total_count'], 2)
+        self.assertEqual(Decimal(r.data['average_amount']), Decimal('1500.00'))
+
+    @patch('billing.receipt_stats.timezone.now')
+    def test_month_query_filter(self, mock_now):
+        mock_now.return_value = timezone.make_aware(datetime(2026, 5, 1, 12, 0, 0))
+        landlord, lt = make_user('landlord_st_mo', 'Landlord')
+        tenant, _ = make_user('tenant_st_mo', 'Tenant')
+        prop = make_property(landlord)
+        self._pay_rec(
+            landlord, tenant, prop, inv_month=3,
+            paid_dt=timezone.make_aware(datetime(2026, 3, 15, 12, 0, 0)),
+            amount='100', suffix='m1',
+        )
+        self._pay_rec(
+            landlord, tenant, prop, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 15, 12, 0, 0)),
+            amount='200', suffix='m2',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {lt.key}')
+        r = self.client.get(reverse('receipt-stats'), {'month': '2026-03'})
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['total_count'], 1)
+        self.assertEqual(Decimal(r.data['average_amount']), Decimal('100.00'))
+        self.assertEqual(r.data['this_month_count'], 0)
+
+    def test_invalid_month_returns_400(self):
+        landlord, lt = make_user('landlord_st_inv', 'Landlord')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {lt.key}')
+        r = self.client.get(reverse('receipt-stats'), {'month': '2026-13'})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('month', r.data)
+
+    def test_invalid_property_returns_400(self):
+        landlord, lt = make_user('landlord_st_ip', 'Landlord')
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {lt.key}')
+        r = self.client.get(reverse('receipt-stats'), {'property': 'nope'})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('property', r.data)
+
+    def test_tenant_scoping_other_tenant_sees_empty(self):
+        landlord, _ = make_user('landlord_st_sc', 'Landlord')
+        t1, t1tok = make_user('tenant_st_t1', 'Tenant')
+        t2, t2tok = make_user('tenant_st_t2', 'Tenant')
+        prop = make_property(landlord)
+        self._pay_rec(
+            landlord, t1, prop, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 1, 12, 0, 0)),
+            amount='50', suffix='s1',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {t2tok.key}')
+        r = self.client.get(reverse('receipt-stats'))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['total_count'], 0)
+
+    def test_agent_scoping_only_assigned_properties(self):
+        landlord, _ = make_user('landlord_st_ag', 'Landlord')
+        agent, atok = make_user('agent_st_ag', 'Agent')
+        tenant, _ = make_user('tenant_st_ag', 'Tenant')
+        pa = make_property(landlord)
+        pb = make_property(landlord)
+        PropertyAgent.objects.create(property=pa, agent=agent, appointed_by=landlord)
+        self._pay_rec(
+            landlord, tenant, pa, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 1, 12, 0, 0)),
+            amount='100', suffix='ag1',
+        )
+        self._pay_rec(
+            landlord, tenant, pb, inv_month=4,
+            paid_dt=timezone.make_aware(datetime(2026, 4, 2, 12, 0, 0)),
+            amount='900', suffix='ag2',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {atok.key}')
+        r = self.client.get(reverse('receipt-stats'))
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['total_count'], 1)
+        self.assertEqual(Decimal(r.data['average_amount']), Decimal('100.00'))

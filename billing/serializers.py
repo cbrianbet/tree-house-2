@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from property.models import Lease
 
@@ -107,10 +108,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Invoice
-        fields = ['id', 'lease', 'period_start', 'period_end', 'due_date',
+        fields = ['id', 'invoice_number', 'lease', 'period_start', 'period_end', 'due_date',
                   'rent_amount', 'late_fee_amount', 'total_amount', 'status',
                   'amount_paid', 'created_at']
-        read_only_fields = ['rent_amount', 'late_fee_amount', 'total_amount', 'status', 'created_at']
+        read_only_fields = ['invoice_number', 'rent_amount', 'late_fee_amount', 'total_amount', 'status', 'created_at']
 
     def get_amount_paid(self, obj):
         return str(obj.amount_paid())
@@ -160,14 +161,160 @@ class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment
         fields = ['id', 'invoice', 'amount', 'stripe_payment_intent_id',
-                  'stripe_charge_id', 'status', 'paid_at', 'created_at']
+                  'stripe_charge_id', 'payment_method', 'transaction_reference',
+                  'status', 'paid_at', 'created_at']
         read_only_fields = ['stripe_payment_intent_id', 'stripe_charge_id', 'status', 'paid_at', 'created_at']
 
 
+_CHARGE_TYPE_NOT_ANNOTATED = object()
+
+
+class ReceiptMethodBreakdownSerializer(serializers.Serializer):
+    mpesa = serializers.FloatField(help_text='Share of receipts (%) paid with M-Pesa.')
+    bank = serializers.FloatField(help_text='Share of receipts (%) paid by bank transfer.')
+    card = serializers.FloatField(help_text='Share of receipts (%) paid by card.')
+    cash = serializers.FloatField(help_text='Share of receipts (%) paid in cash.')
+    other = serializers.FloatField(help_text='Share of receipts (%) with method "other".')
+
+
+class ReceiptStatsSerializer(serializers.Serializer):
+    total_count = serializers.IntegerField(help_text='Receipts after role scope and optional filters.')
+    this_month_count = serializers.IntegerField(
+        help_text='Subset of those receipts whose effective time falls in the current calendar month.',
+    )
+    this_month_total = serializers.CharField(
+        help_text='Sum of payment amounts for `this_month_count` (decimal string, two places).',
+    )
+    method_breakdown = ReceiptMethodBreakdownSerializer(
+        help_text='Percentage of receipts by payment method; keys are fixed; sums to ~100 when total_count > 0.',
+    )
+    average_amount = serializers.CharField(
+        help_text='Mean payment amount over the filtered receipt set (decimal string, two places).',
+    )
+
+
 class ReceiptSerializer(serializers.ModelSerializer):
+    amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, source='payment.amount', read_only=True,
+        help_text='Payment amount (decimal string).',
+    )
+    payment_status = serializers.CharField(
+        source='payment.status', read_only=True,
+        help_text='Underlying payment status: pending, completed, or failed.',
+    )
+    paid_at = serializers.DateTimeField(
+        source='payment.paid_at', read_only=True, allow_null=True,
+        help_text='When the payment completed; null if not set.',
+    )
+    payment_method = serializers.CharField(
+        source='payment.payment_method', read_only=True,
+        help_text='mpesa | bank | card | cash | other',
+    )
+    transaction_ref = serializers.SerializerMethodField(
+        help_text='Gateway reference: `transaction_reference` if set, else `stripe_charge_id`, else null.',
+    )
+    transaction_reference = serializers.SerializerMethodField(
+        help_text='Same resolved reference as `transaction_ref` (duplicate for legacy clients).',
+    )
+    invoice_id = serializers.IntegerField(source='payment.invoice_id', read_only=True)
+    invoice_number = serializers.CharField(source='payment.invoice.invoice_number', read_only=True)
+    invoice_status = serializers.CharField(source='payment.invoice.status', read_only=True)
+    invoice_period_start = serializers.DateField(
+        source='payment.invoice.period_start', read_only=True,
+    )
+    invoice_period_end = serializers.DateField(
+        source='payment.invoice.period_end', read_only=True,
+    )
+    tenant_id = serializers.IntegerField(
+        source='payment.invoice.lease.tenant_id', read_only=True,
+    )
+    tenant_name = serializers.SerializerMethodField()
+    tenant_email = serializers.CharField(
+        source='payment.invoice.lease.tenant.email', read_only=True, allow_blank=True,
+    )
+    unit_id = serializers.IntegerField(
+        source='payment.invoice.lease.unit_id', read_only=True,
+    )
+    unit_name = serializers.CharField(
+        source='payment.invoice.lease.unit.name', read_only=True,
+    )
+    property_id = serializers.IntegerField(
+        source='payment.invoice.lease.unit.property_id', read_only=True,
+    )
+    property_name = serializers.CharField(
+        source='payment.invoice.lease.unit.property.name', read_only=True,
+    )
+    charge_type = serializers.SerializerMethodField(
+        help_text="`Rent` or `Rent + Service` if additional income exists for the unit in the invoice period.",
+    )
+
     class Meta:
         model = Receipt
-        fields = ['id', 'payment', 'receipt_number', 'issued_at']
+        fields = [
+            'id', 'payment', 'receipt_number', 'issued_at',
+            'amount', 'payment_status', 'paid_at', 'payment_method',
+            'transaction_ref', 'transaction_reference',
+            'invoice_id', 'invoice_number', 'invoice_status',
+            'invoice_period_start', 'invoice_period_end',
+            'tenant_id', 'tenant_name', 'tenant_email',
+            'unit_id', 'unit_name', 'property_id', 'property_name',
+            'charge_type',
+        ]
+
+    @extend_schema_field({'type': 'string', 'nullable': True})
+    def get_transaction_ref(self, obj):
+        p = obj.payment
+        ref = p.transaction_reference or p.stripe_charge_id
+        return ref or None
+
+    @extend_schema_field({'type': 'string', 'nullable': True})
+    def get_transaction_reference(self, obj):
+        return self.get_transaction_ref(obj)
+
+    @extend_schema_field(serializers.CharField())
+    def get_tenant_name(self, obj):
+        u = obj.payment.invoice.lease.tenant
+        name = f'{(u.first_name or "").strip()} {(u.last_name or "").strip()}'.strip()
+        if name:
+            return name
+        if u.username:
+            return u.username
+        return u.email or ''
+
+    @extend_schema_field(
+        serializers.ChoiceField(choices=['Rent', 'Rent + Service']),
+    )
+    def get_charge_type(self, obj):
+        flag = getattr(obj, 'has_service_income', _CHARGE_TYPE_NOT_ANNOTATED)
+        if flag is _CHARGE_TYPE_NOT_ANNOTATED:
+            return 'Rent + Service' if self._additional_income_in_invoice_period(obj) else 'Rent'
+        return 'Rent + Service' if flag else 'Rent'
+
+    @staticmethod
+    def _additional_income_in_invoice_period(obj):
+        inv = obj.payment.invoice
+        return AdditionalIncome.objects.filter(
+            unit_id=inv.lease.unit_id,
+            date__gte=inv.period_start,
+            date__lte=inv.period_end,
+        ).exists()
+
+
+class ReceiptListPaginatedSerializer(serializers.Serializer):
+    """OpenAPI envelope for `GET /api/billing/receipts/` (matches DRF PageNumberPagination)."""
+
+    count = serializers.IntegerField(help_text='Total receipts matching filters across all pages.')
+    next = serializers.URLField(
+        allow_null=True,
+        required=False,
+        help_text='URL of the next page, or null when none.',
+    )
+    previous = serializers.URLField(
+        allow_null=True,
+        required=False,
+        help_text='URL of the previous page, or null when none.',
+    )
+    results = ReceiptSerializer(many=True)
 
 
 class ReminderLogSerializer(serializers.ModelSerializer):
