@@ -1108,6 +1108,11 @@ class FinancialReportTests(APITestCase):
         self.assertEqual(response.data['income']['total_income'], '46500.00')
         self.assertEqual(response.data['expenses']['total'], '5000.00')
         self.assertEqual(response.data['net_income'], '41500.00')
+        self.assertEqual(response.data['occupancy']['occupied_units'], 1)
+        self.assertEqual(response.data['occupancy']['total_units'], 1)
+        self.assertEqual(response.data['occupancy']['occupancy_pct'], '100.00')
+        self.assertEqual(response.data['occupancy_avg_pct'], '100.00')
+        self.assertEqual(len(response.data['occupancy_series']), 1)
 
     def test_monthly_report_expense_by_category(self):
         today = date.today()
@@ -1127,6 +1132,55 @@ class FinancialReportTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['period'], str(today.year))
+        self.assertIsNone(response.data['occupancy'])
+        self.assertEqual(len(response.data['occupancy_series']), 12)
+        self.assertIsNotNone(response.data['occupancy_avg_pct'])
+
+    def test_monthly_occupancy_two_units_one_leased(self):
+        make_unit(self.prop, self.landlord)
+        today = date.today()
+        self.auth(self.landlord_token)
+        response = self.client.get(
+            reverse('financial-report', args=[self.prop.id]),
+            {'year': today.year, 'month': today.month}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['occupancy']['total_units'], 2)
+        self.assertEqual(response.data['occupancy']['occupied_units'], 1)
+        self.assertEqual(response.data['occupancy']['occupancy_pct'], '50.00')
+
+    def test_monthly_occupancy_no_units(self):
+        empty_prop = make_property(self.landlord)
+        today = date.today()
+        self.auth(self.landlord_token)
+        response = self.client.get(
+            reverse('financial-report', args=[empty_prop.id]),
+            {'year': today.year, 'month': today.month}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['occupancy']['total_units'], 0)
+        self.assertIsNone(response.data['occupancy']['occupancy_pct'])
+        self.assertIsNone(response.data['occupancy_avg_pct'])
+
+    def test_monthly_occupancy_only_leases_overlapping_period_count(self):
+        self.lease.start_date = date(2024, 1, 1)
+        self.lease.end_date = None
+        self.lease.save()
+        u2 = make_unit(self.prop, self.landlord)
+        tenant2, _ = make_user('tenant2', 'Tenant')
+        Lease.objects.create(
+            unit=u2, tenant=tenant2, start_date=date(2023, 1, 1),
+            end_date=date(2023, 12, 31), rent_amount=Decimal('30000'), is_active=False,
+        )
+        self.auth(self.landlord_token)
+        response = self.client.get(
+            reverse('financial-report', args=[self.prop.id]),
+            {'year': 2024, 'month': 3}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['occupancy']['occupied_units'], 1)
+        self.assertEqual(response.data['occupancy']['total_units'], 2)
+        self.assertEqual(response.data['occupancy']['occupancy_pct'], '50.00')
 
     def test_year_required(self):
         self.auth(self.landlord_token)

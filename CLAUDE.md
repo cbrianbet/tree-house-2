@@ -87,13 +87,13 @@ property/           # property management app
   urls.py           # all URL patterns under /api/property/
   migrations/       # 0005 adds PropertyAgent, 0006 adds TenantApplication, 0009 adds TenantInvitation
 billing/            # rent collection, invoicing, expenses, and reporting app
-  models.py         # BillingConfig, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
+  models.py         # BillingConfig, PropertyBillingNotificationSettings, Invoice, Payment, Receipt, ReminderLog, ChargeType, AdditionalIncome, Expense
   serializers.py    # serializers for all models
-  views.py          # billing endpoints + Stripe webhook handler + financial report
+  views.py          # billing endpoints + Stripe webhook handler + financial report + billing preview
   urls.py           # all URL patterns under /api/billing/
   utils.py          # generate_receipt_number() — format: RCP-YYYYMM-XXXX
-  migrations/       # 0001 initial schema, 0002 adds ChargeType/AdditionalIncome/Expense
-  management/commands/process_billing.py  # daily command: invoices + late fees + reminders
+  migrations/       # 0001 initial schema, 0002 adds ChargeType/AdditionalIncome/Expense, 0003 billing expansion (lead days, late-fee modes, payment rails, charge-type metadata, property notification settings)
+  management/commands/process_billing.py  # daily command: invoices + late fees + reminders (in-app `payment_reminder` + prefs)
 maintenance/        # maintenance request & bidding app
   models.py         # MaintenanceRequest, MaintenanceBid, MaintenanceNote, MaintenanceImage
   serializers.py    # serializers for all models
@@ -106,7 +106,7 @@ notifications/      # in-app notification delivery
   serializers.py    # NotificationSerializer
   views.py          # list (with ?unread=true filter), mark-read, mark-all-read
   urls.py           # /api/notifications/
-  migrations/       # 0001 depends on authentication.0007
+  migrations/       # 0001 depends on authentication.0007; 0002 adds `payment_reminder` choice
 messaging/          # polling-based user-to-user messaging
   models.py         # Conversation (property FK nullable, subject, created_by), ConversationParticipant (unique: conversation+user), Message (conversation, sender, body)
   serializers.py    # ConversationSerializer (unread_count, last_message), MessageSerializer (sender_name)
@@ -179,6 +179,7 @@ Seeded via data migrations. Roles are:
 | GET/PATCH | `/api/auth/me/` | View / update own account (name, email, phone) |
 | GET/PATCH | `/api/auth/me/profile/` | View / update own role profile (auto-creates if missing) |
 | GET/PATCH | `/api/auth/me/notifications/` | View / update notification preferences (auto-creates if missing) |
+| GET | `/api/auth/users/<pk>/profile/` | Lightweight user profile lookup for any authenticated user (`id`, `first_name`, `last_name`, `phone`, `role`) |
 | GET/POST | `/api/auth/roles/` | List / create roles |
 | GET/PUT/DELETE | `/api/auth/roles/<pk>/` | Role detail |
 | GET/POST | `/api/auth/profiles/tenant/` | List / create tenant profiles |
@@ -226,7 +227,9 @@ Seeded via data migrations. Roles are:
 ### Billing (`/api/billing/`)
 | Method | URL | Who |
 |--------|-----|-----|
-| GET/POST | `/api/billing/config/<property_id>/` | Owner/Admin |
+| GET | `/api/billing/config/<property_id>/` | Admin, owner, or assigned agent — `200` with defaults when unset (`configured: false`); full payload when set |
+| POST | `/api/billing/config/<property_id>/` | Owner or admin only (creates/updates config + optional nested `notification_settings`) |
+| GET | `/api/billing/properties/<pk>/billing-preview/` | Admin, owner, or assigned agent — next cycle dates + rent roll estimate |
 | GET/POST | `/api/billing/invoices/` | GET: Admin=all, Landlord=own properties, Agent=assigned, Tenant=own — POST: Admin / property owner / assigned agent (requires billing config on property; body: `lease`, `period_start`, `period_end`, `due_date`, optional `rent_amount`) |
 | GET | `/api/billing/invoices/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/invoices/<pk>/pay/` | Tenant only |
@@ -234,8 +237,8 @@ Seeded via data migrations. Roles are:
 | GET | `/api/billing/receipts/` | Scoped by role |
 | GET | `/api/billing/receipts/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/stripe/webhook/` | Stripe (no auth, CSRF exempt) |
-| GET/POST | `/api/billing/properties/<pk>/charge-types/` | Owner/Admin (GET: Agent too) |
-| GET/PUT/DELETE | `/api/billing/properties/<pk>/charge-types/<id>/` | Owner/Admin |
+| GET/POST | `/api/billing/properties/<pk>/charge-types/` | Owner/Admin (GET: Agent too); `?include_inactive=1` lists soft-disabled types |
+| GET/PUT/DELETE | `/api/billing/properties/<pk>/charge-types/<id>/` | Owner/Admin; DELETE `400` if `AdditionalIncome` references type (use `is_active=false`) |
 | GET/POST | `/api/billing/properties/<pk>/additional-income/` | Owner/Admin (GET: Agent too) |
 | GET/PUT/DELETE | `/api/billing/properties/<pk>/additional-income/<id>/` | Owner/Admin |
 | GET/POST | `/api/billing/properties/<pk>/expenses/` | Owner/Admin (GET: Agent too) |
@@ -250,9 +253,10 @@ Seeded via data migrations. Roles are:
 | POST | `/api/maintenance/requests/` | Tenant or Landlord only (Agents and Artisans cannot submit) |
 | GET | `/api/maintenance/requests/<pk>/` | Submitter, property owner, assigned agent, assigned artisan, admin |
 | PUT | `/api/maintenance/requests/<pk>/` | Status transitions (see below) or field edits (submitter/admin only) |
-| GET | `/api/maintenance/requests/<pk>/bids/` | Artisan=own bid, others=all bids if can_view_request |
+| GET | `/api/maintenance/requests/<pk>/bids/` | Artisan=own bid, others=all bids if can_view_request; includes `artisan_name`, `artisan_rating`, `artisan_trade`, `artisan_job_count` |
 | POST | `/api/maintenance/requests/<pk>/bids/` | Artisan only, request must be `open`, one bid per artisan |
 | PUT | `/api/maintenance/requests/<pk>/bids/<bid_id>/` | Submitter only — `{"status": "accepted"}` or `{"status": "rejected"}` |
+| GET | `/api/maintenance/requests/<pk>/timeline/` | Request activity timeline events (`event_type`, `description`, `actor`, `created_at`) |
 | GET/POST | `/api/maintenance/requests/<pk>/notes/` | Anyone who can view the request |
 | GET/POST | `/api/maintenance/requests/<pk>/images/` | Anyone who can view the request |
 
@@ -427,9 +431,9 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 
 ### Stripe
 - Webhook endpoint is CSRF exempt and uses `AllowAny` — Stripe signature verification replaces auth
-- Payment flow: frontend receives `client_secret` from `/pay/` → Stripe confirms → webhook updates Payment + Invoice + generates Receipt
+- Payment flow: frontend receives `client_secret` from `/pay/` → Stripe confirms → webhook updates Payment + Invoice + generates Receipt; tenant `payment` notification when `PropertyBillingNotificationSettings.send_receipt_on_payment` (default true)
 - Receipt numbers are auto-generated via `billing/utils.py` — never set manually
-- `process_billing` must run daily via cron. Late fees and reminders only fire through this command — they are not triggered by API calls
+- `process_billing` must run daily via cron. Late fees and reminders only fire through this command — they are not triggered by API calls. Invoices generate on `max(1, clamped_rent_due_day - invoice_lead_days)`; late fees use `late_fee_mode` (`percentage` vs `fixed`); rent reminders use `payment_reminder` + per-property notification settings
 
 ### Financial Reporting
 - Reports are computed on the fly — no stored report model
@@ -437,6 +441,7 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - `Expense` records are auto-created when a maintenance request transitions to `completed` — the accepted bid's `proposed_price` becomes the expense amount with `category='maintenance'`
 - Report income = rent payments received + additional income entries; expenses = Expense records; net = income − expenses
 - Annual report: `?year=2024`; monthly report: `?year=2024&month=3`
+- JSON includes `occupancy` (monthly only), `occupancy_series` (one or twelve months), and `occupancy_avg_pct` — lease/date overlap vs non-deleted units (`billing/views.py`)
 
 ### Tenant Applications
 - Only Tenants can submit applications; only the property owner or admin can approve/reject; only the applicant can withdraw
@@ -452,9 +457,9 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 ### Notifications
 - `create_notification(user, type, title, body, action_url='')` lives in `notifications/utils.py` — import from there in any app that needs to trigger a notification
 - Always use a lazy import inside the view function: `from notifications.utils import create_notification` — avoids circular imports
-- Notification types: `message`, `maintenance`, `payment`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`
-- Wired events: dispute created → owner; dispute status change → creator; dispute message → all participants except sender; conversation created → all participants except creator; message sent → all participants except sender; tenant review → reviewed tenant; moving booking created → company; booking status change → customer; role change → affected user
-- `_maybe_send_email()` in `notifications/utils.py` checks `NotificationPreference` before sending email with `fail_silently=True`
+- Notification types: `message`, `maintenance`, `payment`, `payment_reminder`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`
+- Wired events: dispute created → owner; dispute status change → creator; dispute message → all participants except sender; conversation created → all participants except creator; message sent → all participants except sender; tenant review → reviewed tenant; moving booking created → company; booking status change → customer; role change → affected user; `process_billing` rent reminders → tenant (`payment_reminder`); payment recorded (Stripe webhook or manual receipt) → tenant (`payment`) when `send_receipt_on_payment`
+- `_maybe_send_email()` in `notifications/utils.py` checks `NotificationPreference` before sending email with `fail_silently=True` — maps `payment_reminder` → `payment_due_reminder`, `payment` → `payment_received`
 
 ### Messaging
 - Conversations are identified by `property` + `subject` — no deduplication enforced, clients should check before creating

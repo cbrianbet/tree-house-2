@@ -176,7 +176,7 @@ def my_view(request):
     )
 ```
 
-Valid `notification_type` values: `message`, `maintenance`, `payment`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`.
+Valid `notification_type` values: `message`, `maintenance`, `payment`, `payment_reminder`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`.
 
 ---
 

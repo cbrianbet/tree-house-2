@@ -8,6 +8,7 @@ from rest_framework import status
 from django.contrib.auth import get_user_model
 
 from authentication.models import Role, ArtisanProfile
+from notifications.models import Notification
 from property.models import Property, Unit, Lease, PropertyAgent
 from maintenance.models import MaintenanceRequest, MaintenanceBid, MaintenanceNote
 
@@ -370,6 +371,71 @@ class BiddingTests(APITestCase):
         self.auth(self.landlord_token)
         response = self.client.get(reverse('maintenance-bid-list', args=[self.req.id]))
         self.assertEqual(len(response.data), 2)
+
+    def test_bid_list_includes_artisan_profile_fields(self):
+        self.artisan.first_name = 'Chris'
+        self.artisan.last_name = 'Plumber'
+        self.artisan.save()
+        self.artisan.artisan_profile.rating = Decimal('4.80')
+        self.artisan.artisan_profile.save()
+        completed = make_request(self.prop, self.tenant, self.unit, req_status='completed')
+        completed.assigned_to = self.artisan
+        completed.save()
+        MaintenanceBid.objects.create(request=self.req, artisan=self.artisan, proposed_price='8500')
+
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('maintenance-bid-list', args=[self.req.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        bid = response.data[0]
+        self.assertEqual(bid['artisan_name'], 'Chris Plumber')
+        self.assertEqual(bid['artisan_rating'], '4.80')
+        self.assertEqual(bid['artisan_trade'], 'Plumbing')
+        self.assertEqual(bid['artisan_job_count'], 1)
+
+
+class TimelineTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')
+        self.tenant, self.tenant_token = make_user('tenant1', 'Tenant')
+        self.other_tenant, self.other_token = make_user('tenant2', 'Tenant')
+        self.artisan, self.artisan_token = make_user('artisan1', 'Artisan')
+        ArtisanProfile.objects.create(user=self.artisan, trade='plumbing')
+
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.req = make_request(self.prop, self.tenant, self.unit, req_status='open')
+        self.bid = MaintenanceBid.objects.create(request=self.req, artisan=self.artisan, proposed_price='9000')
+        self.note = MaintenanceNote.objects.create(request=self.req, author=self.landlord, note='Technician scheduled.')
+        Notification.objects.create(
+            user=self.tenant,
+            notification_type='maintenance',
+            title='Maintenance Update',
+            body='You were notified via push and email.',
+            action_url=f'/maintenance/requests/{self.req.id}',
+        )
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_timeline_includes_core_events(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('maintenance-request-timeline', args=[self.req.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        event_types = [event['event_type'] for event in response.data]
+        self.assertIn('request_submitted', event_types)
+        self.assertIn('bid_submitted', event_types)
+        self.assertIn('note_added', event_types)
+        self.assertIn('notification_sent', event_types)
+
+    def test_unrelated_user_cannot_view_timeline(self):
+        self.auth(self.other_token)
+        response = self.client.get(reverse('maintenance-request-timeline', args=[self.req.id]))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_timeline_returns_404_for_missing_request(self):
+        self.auth(self.landlord_token)
+        response = self.client.get(reverse('maintenance-request-timeline', args=[99999]))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
 
 class NoteTests(APITestCase):

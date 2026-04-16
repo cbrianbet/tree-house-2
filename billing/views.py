@@ -16,7 +16,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 
 from property.models import Property, Unit, Lease
 from property.views import is_admin, is_landlord, is_agent_for
@@ -39,6 +39,39 @@ from .serializers import (
 from .utils import generate_receipt_number
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+def _units_reporting_qs(prop):
+    return Unit.objects.filter(property=prop, deleted_at__isnull=True)
+
+
+def _occupancy_for_period(prop, period_start, period_end):
+    """
+    Units with a lease overlapping [period_start, period_end] (inclusive),
+    over non-deleted units on the property. Percent is two decimal places.
+    """
+    total = _units_reporting_qs(prop).count()
+    if total == 0:
+        return {
+            'occupied_units': 0,
+            'total_units': 0,
+            'occupancy_pct': None,
+        }
+    occupied = (
+        Lease.objects.filter(
+            unit__property=prop,
+            unit__deleted_at__isnull=True,
+            start_date__lte=period_end,
+        )
+        .filter(Q(end_date__isnull=True) | Q(end_date__gte=period_start))
+        .count()
+    )
+    pct = (Decimal(occupied) / Decimal(total) * Decimal('100')).quantize(Decimal('0.01'))
+    return {
+        'occupied_units': occupied,
+        'total_units': total,
+        'occupancy_pct': str(pct),
+    }
 
 
 def _property_sends_receipt_on_payment(prop):
@@ -877,6 +910,20 @@ def billing_preview(request, property_pk):
             },
             "net_income": "117500.00",
             "invoices": {"paid": 3, "pending": 0, "overdue": 0, "partial": 0, "cancelled": 0},
+            "occupancy": {
+                "occupied_units": 8,
+                "total_units": 10,
+                "occupancy_pct": "80.00",
+            },
+            "occupancy_series": [
+                {
+                    "period": "2024-03",
+                    "occupied_units": 8,
+                    "total_units": 10,
+                    "occupancy_pct": "80.00",
+                },
+            ],
+            "occupancy_avg_pct": "80.00",
         }),
     ],
 )
@@ -960,7 +1007,30 @@ def financial_report(request, property_pk):
     total_income = total_collected + additional_total
     net_income = total_income - expense_total
 
-    return Response({
+    if month:
+        p_start = date(year, month, 1)
+        p_end = date(year, month, calendar.monthrange(year, month)[1])
+        occupancy = _occupancy_for_period(prop, p_start, p_end)
+        occupancy_series = [{'period': period_label, **occupancy}]
+        occupancy_avg_pct = occupancy['occupancy_pct']
+    else:
+        occupancy = None
+        occupancy_series = []
+        month_pcts = []
+        for m in range(1, 13):
+            p_start = date(year, m, 1)
+            p_end = date(year, m, calendar.monthrange(year, m)[1])
+            row = _occupancy_for_period(prop, p_start, p_end)
+            occupancy_series.append({'period': f'{year}-{m:02d}', **row})
+            if row['occupancy_pct'] is not None:
+                month_pcts.append(Decimal(row['occupancy_pct']))
+        occupancy_avg_pct = None
+        if month_pcts:
+            occupancy_avg_pct = str(
+                (sum(month_pcts) / Decimal(len(month_pcts))).quantize(Decimal('0.01'))
+            )
+
+    payload = {
         'property': property_pk,
         'period': period_label,
         'income': {
@@ -984,4 +1054,8 @@ def financial_report(request, property_pk):
             'partial': invoice_counts.get('partial', 0),
             'cancelled': invoice_counts.get('cancelled', 0),
         },
-    })
+        'occupancy': occupancy,
+        'occupancy_series': occupancy_series,
+        'occupancy_avg_pct': occupancy_avg_pct,
+    }
+    return Response(payload)

@@ -1,23 +1,32 @@
 from django.utils import timezone
+from django.db.models import Count, Q
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
+from authentication.models import Role
 from property.models import PropertyAgent, Lease
 from property.views import is_admin, is_landlord, is_agent_for
 from .models import MaintenanceRequest, MaintenanceBid, MaintenanceNote, MaintenanceImage
 from .serializers import (
     MaintenanceRequestSerializer, MaintenanceBidSerializer,
-    MaintenanceNoteSerializer, MaintenanceImageSerializer,
+    MaintenanceNoteSerializer, MaintenanceImageSerializer, MaintenanceTimelineEventSerializer,
 )
 
 
 # ── Permission helpers ──────────────────────────────────────────────────────────
 
 def is_artisan(user):
-    return user.is_authenticated and hasattr(user, 'role') and user.role.name == 'Artisan'
+    return user.is_authenticated and hasattr(user, 'role') and user.role.name == Role.ARTISAN
+
+
+def _display_name(user):
+    if not user:
+        return None
+    full_name = f"{user.first_name} {user.last_name}".strip()
+    return full_name or user.username
 
 
 def can_view_request(user, req):
@@ -70,7 +79,7 @@ def request_list_create(request):
             qs = MaintenanceRequest.objects.select_related('property', 'unit', 'submitted_by').all()
         elif is_landlord(user):
             qs = MaintenanceRequest.objects.filter(property__owner=user)
-        elif hasattr(user, 'role') and user.role.name == 'Agent':
+        elif hasattr(user, 'role') and user.role.name == Role.AGENT:
             assigned_ids = PropertyAgent.objects.filter(agent=user).values_list('property_id', flat=True)
             qs = MaintenanceRequest.objects.filter(property_id__in=assigned_ids)
         elif is_artisan(user):
@@ -88,7 +97,7 @@ def request_list_create(request):
         return Response(serializer.data)
 
     elif request.method == 'POST':
-        if is_artisan(user) or (hasattr(user, 'role') and user.role.name == 'Agent'):
+        if is_artisan(user) or (hasattr(user, 'role') and user.role.name == Role.AGENT):
             return Response({'detail': 'Agents and artisans cannot submit maintenance requests.'}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = MaintenanceRequestSerializer(data=request.data)
@@ -259,9 +268,21 @@ def bid_list_create(request, pk):
     if request.method == 'GET':
         # Artisans see only their own bid; others see all
         if is_artisan(user):
-            bids = req.bids.filter(artisan=user)
+            bids = req.bids.select_related('artisan__artisan_profile').filter(artisan=user).annotate(
+                artisan_completed_jobs=Count(
+                    'artisan__assigned_maintenance',
+                    filter=Q(artisan__assigned_maintenance__status='completed'),
+                    distinct=True,
+                )
+            )
         elif can_view_request(user, req):
-            bids = req.bids.select_related('artisan').all()
+            bids = req.bids.select_related('artisan__artisan_profile').all().annotate(
+                artisan_completed_jobs=Count(
+                    'artisan__assigned_maintenance',
+                    filter=Q(artisan__assigned_maintenance__status='completed'),
+                    distinct=True,
+                )
+            )
         else:
             return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
         return Response(MaintenanceBidSerializer(bids, many=True).data)
@@ -324,6 +345,84 @@ def bid_detail(request, pk, bid_id):
         bid.save()
 
     return Response(MaintenanceBidSerializer(bid).data)
+
+
+@extend_schema(
+    methods=['GET'],
+    summary="Get activity timeline for a maintenance request",
+    responses=MaintenanceTimelineEventSerializer(many=True),
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def request_timeline(request, pk):
+    try:
+        req = MaintenanceRequest.objects.select_related(
+            'property',
+            'submitted_by',
+            'assigned_to',
+        ).get(pk=pk)
+    except MaintenanceRequest.DoesNotExist:
+        return Response({'detail': 'Request not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not can_view_request(request.user, req):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    events = [{
+        'event_type': 'request_submitted',
+        'description': f"Maintenance request submitted: {req.title}.",
+        'actor': _display_name(req.submitted_by),
+        'created_at': req.created_at,
+    }]
+
+    bids = req.bids.select_related('artisan').all()
+    for bid in bids:
+        events.append({
+            'event_type': 'bid_submitted',
+            'description': f"{_display_name(bid.artisan)} submitted a bid of KES {bid.proposed_price}.",
+            'actor': _display_name(bid.artisan),
+            'created_at': bid.created_at,
+        })
+        if bid.status in ('accepted', 'rejected'):
+            events.append({
+                'event_type': f"bid_{bid.status}",
+                'description': f"Bid by {_display_name(bid.artisan)} was {bid.status}.",
+                'actor': _display_name(req.submitted_by),
+                'created_at': req.updated_at,
+            })
+
+    notes = req.notes.select_related('author').all()
+    for note in notes:
+        events.append({
+            'event_type': 'note_added',
+            'description': note.note,
+            'actor': _display_name(note.author),
+            'created_at': note.created_at,
+        })
+
+    if req.status != 'submitted':
+        events.append({
+            'event_type': 'status_changed',
+            'description': f"Request status is now {req.status.replace('_', ' ')}.",
+            'actor': _display_name(req.assigned_to) if req.status == 'in_progress' else _display_name(req.submitted_by),
+            'created_at': req.resolved_at or req.updated_at,
+        })
+
+    from notifications.models import Notification
+    request_path = f"/maintenance/requests/{req.id}"
+    notifications = Notification.objects.filter(
+        notification_type='maintenance',
+        action_url__icontains=request_path,
+    ).select_related('user')
+    for notif in notifications:
+        events.append({
+            'event_type': 'notification_sent',
+            'description': f"{notif.title}: {notif.body}",
+            'actor': _display_name(notif.user),
+            'created_at': notif.created_at,
+        })
+
+    events.sort(key=lambda event: event['created_at'])
+    return Response(MaintenanceTimelineEventSerializer(events, many=True).data)
 
 
 # ── Notes ───────────────────────────────────────────────────────────────────────
