@@ -133,6 +133,12 @@ class Payment(models.Model):
 
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    fee_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text='Optional per-payment fee, not counted towards invoice principal.',
+    )
     stripe_payment_intent_id = models.CharField(max_length=200, unique=True)
     stripe_charge_id = models.CharField(max_length=200, blank=True)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default=PAYMENT_METHOD_OTHER)

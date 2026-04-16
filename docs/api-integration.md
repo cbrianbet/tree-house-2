@@ -985,26 +985,54 @@ Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc
 
 **Who can call:** platform admin, property owner, or agent assigned to the property. The tenant must use `**POST .../pay/`** for Stripe instead.
 
-**Rules:**
+**Request body**
 
-- `amount` is required (decimal string). It must not exceed the **remaining balance** (`total_amount` minus sum of completed payments).
+```json
+{
+  "amount": "25000.00",
+  "payment_method": "mpesa",
+  "fee_amount": "150.00",
+  "transaction_reference": "QHJ7K2MN01"
+}
+```
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `amount` | **yes** | Decimal string **`≥ 0.01`**. Must not exceed the invoice **remaining balance** (`total_amount` minus sum of completed **`Payment.amount`**). Only this field affects whether the invoice moves to `partial` / `paid` / remaining balance. |
+| `payment_method` | no | How the principal was collected. Allowed values (**case-insensitive**): **`mpesa`**, **`bank`**, **`card`**, **`cash`**, **`other`**. Stored on **`Payment.payment_method`**. If omitted, the API defaults to **`cash`** for manual payments. Invalid value → **400** with `payment_method: ["Invalid choice."]`. On receipts, this field is returned on the enriched row; receipt **list** can filter with `method=`. Receipt **stats** include **`method_breakdown`** (percentages by method) while **`this_month_total`** and **`average_amount`** stay **principal-only** (receipt / payment `amount`, not `fee_amount`). |
+| `fee_amount` | no | Optional decimal string **`≥ 0`** (omit or use **`0.00`** when none). Stored on **`Payment.fee_amount`**. Does **not** reduce invoice principal or remaining balance; invoice math uses **`amount` only**. |
+| `transaction_reference` | no | Optional external reference (M-Pesa code, bank ref, etc.). Stored on **`Payment.transaction_reference`**. Receipts expose the same value as **`transaction_ref`** and **`transaction_reference`** (see Receipts section). |
+
+**Other rules**
+
 - Cannot record on a **cancelled** invoice or when the balance is already **zero**.
 - Multiple POSTs are allowed for **partial** payments until the invoice is fully paid.
 
 ```json
-// Request
+// Request — minimal (method defaults to cash, fee defaults to 0)
 { "amount": "25000.00" }
+
+// Request — full
+{
+  "amount": "25000.00",
+  "payment_method": "mpesa",
+  "fee_amount": "150.00",
+  "transaction_reference": "QHJ7K2MN01"
+}
 ```
 
 ```json
-// Response 201
+// Response 201 — `receipt` uses the same enriched shape as GET /api/billing/receipts/
 {
   "payment": {
     "id": 4,
     "invoice": 1,
     "amount": "25000.00",
+    "fee_amount": "150.00",
     "stripe_payment_intent_id": "manual-abc123...",
     "stripe_charge_id": "",
+    "payment_method": "mpesa",
+    "transaction_reference": "QHJ7K2MN01",
     "status": "completed",
     "paid_at": "2024-02-15T11:00:00Z",
     "created_at": "2024-02-15T11:00:00Z"
@@ -1013,18 +1041,26 @@ Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc
     "id": 2,
     "payment": 4,
     "receipt_number": "RCP-202402-0002",
-    "issued_at": "2024-02-15T11:00:00Z"
+    "issued_at": "2024-02-15T11:00:00Z",
+    "amount": "25000.00",
+    "fee_amount": "150.00",
+    "payment_method": "mpesa",
+    "transaction_ref": "QHJ7K2MN01",
+    "transaction_reference": "QHJ7K2MN01",
+    "...": "see Receipts section for full field list"
   }
 }
 ```
 
-
-| Error                         | Status |
-| ----------------------------- | ------ |
-| Tenant or unrelated user      | `403`  |
-| Invoice cancelled             | `400`  |
-| Balance already zero          | `400`  |
-| Amount over remaining balance | `400`  |
+| Error | Status | Notes |
+| ----- | ------ | ----- |
+| Tenant or unrelated user | `403` | |
+| Invoice cancelled | `400` | |
+| Balance already zero | `400` | |
+| `amount` over remaining balance | `400` | |
+| Missing / invalid `amount` (e.g. not a decimal, below `0.01`) | `400` | Field errors under `amount`. |
+| Invalid `payment_method` | `400` | `payment_method: ["Invalid choice."]` |
+| Negative or invalid `fee_amount` | `400` | Field errors under `fee_amount`. |
 
 
 ---
@@ -1096,6 +1132,7 @@ Optional **`property`** (positive integer) and **`month`** (`YYYY-MM`) with the 
   "receipt_number": "RCP-202604-0001",
   "issued_at": "2026-04-16T12:00:00Z",
   "amount": "1500.00",
+  "fee_amount": "0.00",
   "payment_status": "completed",
   "paid_at": "2026-04-16T11:30:00Z",
   "payment_method": "card",
@@ -1120,6 +1157,7 @@ Optional **`property`** (positive integer) and **`month`** (`YYYY-MM`) with the 
 | Field | Notes |
 | ----- | ----- |
 | `payment` | PK of the related `Payment`. |
+| `fee_amount` | Per-payment fee (decimal string); **`0.00`** when none. Not included in invoice balance / receipt stats totals (principal only). |
 | `transaction_ref` / `transaction_reference` | Same resolved value: `transaction_reference` if set, else `stripe_charge_id`, else `null`. Both keys are returned for frontend compatibility. |
 | `charge_type` | **`Rent`** or **`Rent + Service`** if any `AdditionalIncome` exists for the unit on a date within the invoice period. |
 | `payment_status` | `pending`, `completed`, or `failed`. |

@@ -385,11 +385,29 @@ def pay_invoice(request, pk):
 @extend_schema(
     methods=['POST'],
     summary="Record a manual payment (cash, bank transfer, etc.)",
+    description=(
+        'Body: `amount` (required) must not exceed remaining invoice balance. '
+        '`payment_method` optional — `mpesa`, `bank`, `card`, `cash`, `other` (case-insensitive); '
+        'when omitted, defaults to **`cash`**. '
+        '`fee_amount` optional non-negative decimal — recorded on the payment but **does not** reduce invoice balance '
+        '(only `amount` counts toward paid/partial). '
+        '`transaction_reference` optional — stored on `Payment` and surfaced on receipts.'
+    ),
     examples=[
         OpenApiExample(
-            "Record manual payment",
+            "Record manual payment (amount only)",
             request_only=True,
             value={'amount': '25000.00'},
+        ),
+        OpenApiExample(
+            "Record manual payment (method, fee, reference)",
+            request_only=True,
+            value={
+                'amount': '25000.00',
+                'payment_method': 'mpesa',
+                'fee_amount': '150.00',
+                'transaction_reference': 'QHJ7K2MN01',
+            },
         ),
     ],
 )
@@ -434,13 +452,20 @@ def invoice_payments(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    pay_method = serializer.validated_data.get('payment_method') or Payment.PAYMENT_METHOD_CASH
+    fee_amt = serializer.validated_data.get('fee_amount', Decimal('0'))
+    tx_ref = serializer.validated_data.get('transaction_reference')
+
     manual_ref = f'manual-{uuid.uuid4().hex}'
     try:
         with transaction.atomic():
             payment = Payment.objects.create(
                 invoice=invoice,
                 amount=amount,
+                fee_amount=fee_amt,
                 stripe_payment_intent_id=manual_ref,
+                payment_method=pay_method,
+                transaction_reference=tx_ref,
                 status='completed',
                 paid_at=timezone.now(),
             )
@@ -692,6 +717,7 @@ def receipt_stats(request):
                         'receipt_number': 'RCP-202604-0001',
                         'issued_at': '2026-04-16T12:00:00Z',
                         'amount': '1500.00',
+                        'fee_amount': '0.00',
                         'payment_status': 'completed',
                         'paid_at': '2026-04-16T11:30:00Z',
                         'payment_method': 'card',
@@ -754,6 +780,7 @@ def receipt_list(request):
                 'receipt_number': 'RCP-202604-0001',
                 'issued_at': '2026-04-16T12:00:00Z',
                 'amount': '1500.00',
+                'fee_amount': '25.00',
                 'payment_status': 'completed',
                 'paid_at': '2026-04-16T11:30:00Z',
                 'payment_method': 'card',
