@@ -11,12 +11,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from drf_spectacular.utils import extend_schema, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, Exists, OuterRef
 
 from property.models import Property, Unit, Lease
 from property.views import is_admin, is_landlord, is_agent_for
@@ -33,12 +34,37 @@ from .models import (
 from .serializers import (
     BillingConfigSerializer, InvoiceSerializer, InvoiceCreateSerializer,
     ManualPaymentRecordSerializer,
-    PaymentSerializer, ReceiptSerializer,
+    PaymentSerializer, ReceiptSerializer, ReceiptListPaginatedSerializer, ReceiptStatsSerializer,
     ChargeTypeSerializer, AdditionalIncomeSerializer, ExpenseSerializer,
 )
 from .utils import generate_receipt_number
+from .pagination import ReceiptListPagination
+from .receipt_filters import (
+    validate_receipt_list_query_params,
+    validate_receipt_stats_query_params,
+    apply_receipt_list_filters,
+)
+from .receipt_stats import build_receipt_stats_payload
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+def _receipt_base_queryset():
+    """
+    Receipts with payment → invoice → lease → unit, property, tenant preloaded,
+    plus has_service_income annotation (AdditionalIncome rows for the unit in the invoice period).
+    """
+    service_income = AdditionalIncome.objects.filter(
+        unit_id=OuterRef('payment__invoice__lease__unit_id'),
+        date__gte=OuterRef('payment__invoice__period_start'),
+        date__lte=OuterRef('payment__invoice__period_end'),
+    )
+    return Receipt.objects.select_related(
+        'payment__invoice__lease__unit__property',
+        'payment__invoice__lease__tenant',
+    ).annotate(
+        has_service_income=Exists(service_income),
+    )
 
 
 def _units_reporting_qs(prop):
@@ -501,32 +527,261 @@ def _handle_payment_failure(intent):
 
 # ── Receipts ───────────────────────────────────────────────────────────────────
 
-@extend_schema(methods=['GET'], summary="List receipts")
+def _receipt_list_scoped_queryset(user):
+    base = _receipt_base_queryset()
+    if is_admin(user):
+        return base.all()
+    if is_landlord(user):
+        return base.filter(payment__invoice__lease__unit__property__owner=user)
+    if hasattr(user, 'role') and user.role.name == 'Agent':
+        from property.models import PropertyAgent
+        assigned_ids = PropertyAgent.objects.filter(agent=user).values_list('property_id', flat=True)
+        return base.filter(payment__invoice__lease__unit__property_id__in=assigned_ids)
+    return base.filter(payment__invoice__lease__tenant=user)
+
+
+_PAYMENT_METHOD_QUERY_ENUM = [c[0] for c in Payment.PAYMENT_METHOD_CHOICES]
+
+
+@extend_schema(
+    operation_id='billing_receipt_stats',
+    methods=['GET'],
+    summary='Receipt aggregates for dashboard',
+    description=(
+        'Aggregates over receipts visible to the caller (same role scoping as `GET /api/billing/receipts/`). '
+        'Optional `property` and `month` filters use the same validation rules as the list endpoint. '
+        '`this_month_*` fields use the server timezone’s current calendar month against '
+        '`Coalesce(payment.paid_at, issued_at)`. '
+        '`method_breakdown` contains every payment method key; values are percentages of receipts (0–100, two decimals) '
+        'and sum to (approximately) 100 when `total_count > 0`.'
+    ),
+    parameters=[
+        OpenApiParameter(
+            name='property',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description='Restrict stats to receipts for this property ID (positive integer).',
+        ),
+        OpenApiParameter(
+            name='month',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description=(
+                'Further restrict the underlying receipt set to those whose effective time '
+                '(`Coalesce(paid_at, issued_at)`) falls in the given calendar month. '
+                'Format: `YYYY-MM`; month 01–12.'
+            ),
+        ),
+    ],
+    responses={200: ReceiptStatsSerializer},
+    examples=[
+        OpenApiExample(
+            'Receipt stats (sample)',
+            value={
+                'total_count': 48,
+                'this_month_count': 6,
+                'this_month_total': '125000.50',
+                'method_breakdown': {
+                    'mpesa': 37.5,
+                    'bank': 12.5,
+                    'card': 25.0,
+                    'cash': 12.5,
+                    'other': 12.5,
+                },
+                'average_amount': '2604.18',
+            },
+            response_only=True,
+        ),
+    ],
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def receipt_stats(request):
+    errors, parsed = validate_receipt_stats_query_params(request.query_params)
+    if errors:
+        return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+    qs = _receipt_list_scoped_queryset(request.user)
+    qs = apply_receipt_list_filters(qs, parsed)
+    payload = build_receipt_stats_payload(qs)
+    serializer = ReceiptStatsSerializer(instance=payload)
+    return Response(serializer.data)
+
+
+@extend_schema(
+    operation_id='billing_receipt_list',
+    methods=['GET'],
+    summary='List receipts',
+    description=(
+        'Paginated receipts for the authenticated user: **Admin** — all; **Landlord** — own properties; '
+        '**Agent** — assigned properties; **Tenant** — own leases. '
+        'Filters combine with AND logic. '
+        'Invalid query parameters return **400** with field keys (`property`, `method`, `month`, …) '
+        'mapped to lists of human-readable messages.'
+    ),
+    parameters=[
+        OpenApiParameter(
+            name='property',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description='Property PK. Must be a positive integer.',
+        ),
+        OpenApiParameter(
+            name='method',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            enum=_PAYMENT_METHOD_QUERY_ENUM,
+            description=(
+                'Filter by `Payment.payment_method`. Must be one of the enum values (request is compared case-insensitively).'
+            ),
+        ),
+        OpenApiParameter(
+            name='month',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description=(
+                'Calendar month filter on effective receipt timestamp: `Coalesce(payment.paid_at, issued_at)` '
+                'must fall inside that month in the active Django timezone. '
+                'Format **`YYYY-MM`** (e.g. `2026-04`). Month part must be `01`–`12`.'
+            ),
+        ),
+        OpenApiParameter(
+            name='search',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description=(
+                'Case-insensitive substring match on receipt number, invoice number, unit name, '
+                'tenant email, transaction reference, or tenant full name (first + last).'
+            ),
+        ),
+        OpenApiParameter(
+            name='page',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description='1-based page index. Default: 1.',
+        ),
+        OpenApiParameter(
+            name='page_size',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description=(
+                'Items per page. Default: 20. Maximum: 100 (DRF clamps larger values to the max).'
+            ),
+        ),
+    ],
+    responses={200: ReceiptListPaginatedSerializer},
+    examples=[
+        OpenApiExample(
+            'Receipt list (single page)',
+            value={
+                'count': 1,
+                'next': None,
+                'previous': None,
+                'results': [
+                    {
+                        'id': 42,
+                        'payment': 99,
+                        'receipt_number': 'RCP-202604-0001',
+                        'issued_at': '2026-04-16T12:00:00Z',
+                        'amount': '1500.00',
+                        'payment_status': 'completed',
+                        'paid_at': '2026-04-16T11:30:00Z',
+                        'payment_method': 'card',
+                        'transaction_ref': 'TXN-001',
+                        'transaction_reference': 'TXN-001',
+                        'invoice_id': 12,
+                        'invoice_number': 'INV-000012',
+                        'invoice_status': 'paid',
+                        'invoice_period_start': '2026-04-01',
+                        'invoice_period_end': '2026-04-28',
+                        'tenant_id': 5,
+                        'tenant_name': 'Jane Doe',
+                        'tenant_email': 'jane@example.com',
+                        'unit_id': 3,
+                        'unit_name': 'A1',
+                        'property_id': 1,
+                        'property_name': 'Sunset Apartments',
+                        'charge_type': 'Rent',
+                    },
+                ],
+            },
+            response_only=True,
+        ),
+    ],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def receipt_list(request):
-    user = request.user
-    if is_admin(user):
-        receipts = Receipt.objects.select_related('payment__invoice__lease').all()
-    elif is_landlord(user):
-        receipts = Receipt.objects.filter(payment__invoice__lease__unit__property__owner=user)
-    elif hasattr(user, 'role') and user.role.name == 'Agent':
-        from property.models import PropertyAgent
-        assigned_ids = PropertyAgent.objects.filter(agent=user).values_list('property_id', flat=True)
-        receipts = Receipt.objects.filter(payment__invoice__lease__unit__property_id__in=assigned_ids)
-    else:
-        receipts = Receipt.objects.filter(payment__invoice__lease__tenant=user)
+    receipts = _receipt_list_scoped_queryset(request.user)
 
-    return Response(ReceiptSerializer(receipts, many=True).data)
+    allowed_methods = {c[0] for c in Payment.PAYMENT_METHOD_CHOICES}
+    errors, parsed = validate_receipt_list_query_params(request.query_params, allowed_methods)
+    if errors:
+        return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+    receipts = apply_receipt_list_filters(receipts, parsed)
+    receipts = receipts.order_by('-issued_at', '-id')
+
+    paginator = ReceiptListPagination()
+    page = paginator.paginate_queryset(receipts, request)
+    serializer = ReceiptSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 
-@extend_schema(methods=['GET'], summary="Get receipt detail")
+@extend_schema(
+    operation_id='billing_receipt_detail',
+    methods=['GET'],
+    summary='Get receipt detail',
+    description=(
+        'Same JSON shape as each object in `GET /api/billing/receipts/` `results`. '
+        '**404** if the receipt does not exist; **403** if it exists but is outside the caller’s scope.'
+    ),
+    responses={200: ReceiptSerializer},
+    examples=[
+        OpenApiExample(
+            'Receipt detail',
+            value={
+                'id': 42,
+                'payment': 99,
+                'receipt_number': 'RCP-202604-0001',
+                'issued_at': '2026-04-16T12:00:00Z',
+                'amount': '1500.00',
+                'payment_status': 'completed',
+                'paid_at': '2026-04-16T11:30:00Z',
+                'payment_method': 'card',
+                'transaction_ref': 'TXN-001',
+                'transaction_reference': 'TXN-001',
+                'invoice_id': 12,
+                'invoice_number': 'INV-000012',
+                'invoice_status': 'paid',
+                'invoice_period_start': '2026-04-01',
+                'invoice_period_end': '2026-04-28',
+                'tenant_id': 5,
+                'tenant_name': 'Jane Doe',
+                'tenant_email': 'jane@example.com',
+                'unit_id': 3,
+                'unit_name': 'A1',
+                'property_id': 1,
+                'property_name': 'Sunset Apartments',
+                'charge_type': 'Rent + Service',
+            },
+            response_only=True,
+        ),
+    ],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def receipt_detail(request, pk):
-    try:
-        receipt = Receipt.objects.select_related('payment__invoice__lease__unit__property').get(pk=pk)
-    except Receipt.DoesNotExist:
+    receipt = _receipt_base_queryset().filter(pk=pk).first()
+    if receipt is None:
         return Response({'detail': 'Receipt not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     user = request.user

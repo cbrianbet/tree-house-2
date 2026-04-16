@@ -2,6 +2,7 @@ from django.db import models
 from django.utils import timezone
 from authentication.models import CustomUser
 from property.models import Property, Unit, Lease
+from billing.utils import generate_invoice_number
 
 
 class BillingConfig(models.Model):
@@ -75,6 +76,7 @@ class Invoice(models.Model):
     ]
 
     lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name='invoices')
+    invoice_number = models.CharField(max_length=32, unique=True, blank=True, db_index=True)
     period_start = models.DateField()
     period_end = models.DateField()
     due_date = models.DateField()
@@ -87,8 +89,14 @@ class Invoice(models.Model):
     class Meta:
         unique_together = ('lease', 'period_start')
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if not self.invoice_number:
+            self.invoice_number = generate_invoice_number(self.pk)
+            type(self).objects.filter(pk=self.pk).update(invoice_number=self.invoice_number)
+
     def __str__(self):
-        return f"Invoice {self.id} — {self.lease.unit} ({self.period_start})"
+        return f"Invoice {self.invoice_number or self.id} — {self.lease.unit} ({self.period_start})"
 
     def amount_paid(self):
         return sum(p.amount for p in self.payments.filter(status='completed'))
@@ -110,11 +118,25 @@ class Payment(models.Model):
         ('completed', 'Completed'),
         ('failed', 'Failed'),
     ]
+    PAYMENT_METHOD_MPESA = 'mpesa'
+    PAYMENT_METHOD_BANK = 'bank'
+    PAYMENT_METHOD_CARD = 'card'
+    PAYMENT_METHOD_CASH = 'cash'
+    PAYMENT_METHOD_OTHER = 'other'
+    PAYMENT_METHOD_CHOICES = [
+        (PAYMENT_METHOD_MPESA, 'M-Pesa'),
+        (PAYMENT_METHOD_BANK, 'Bank'),
+        (PAYMENT_METHOD_CARD, 'Card'),
+        (PAYMENT_METHOD_CASH, 'Cash'),
+        (PAYMENT_METHOD_OTHER, 'Other'),
+    ]
 
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     stripe_payment_intent_id = models.CharField(max_length=200, unique=True)
     stripe_charge_id = models.CharField(max_length=200, blank=True)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default=PAYMENT_METHOD_OTHER)
+    transaction_reference = models.CharField(max_length=128, blank=True, null=True, db_index=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

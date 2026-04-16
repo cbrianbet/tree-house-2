@@ -8,117 +8,120 @@ Content-Type: `application/json`
 
 ## Role Permissions Matrix
 
-`✓` = allowed &nbsp; `✗` = forbidden (403) &nbsp; `—` = not applicable to this role
+`✓` = allowed   `✗` = forbidden (403)   `—` = not applicable to this role
 
-| Action | Public | Admin | Landlord | Agent | Tenant | Artisan | MovingCompany |
-|--------|:------:|:-----:|:--------:|:-----:|:------:|:-------:|:-------------:|
-| **— ACCOUNT —** | | | | | | |
-| Register / Login / Logout | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Accept tenant invitation (no auth) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| View & update own account | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| View & update own role profile | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Change password | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Manage notification preferences | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **— PROPERTIES —** | | | | | | | |
-| Browse & filter public units | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Create / manage saved searches | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| List properties | ✗ | All | Own | Assigned | ✗ | ✗ | ✗ |
-| Create property | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
-| View / update property | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Delete property | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
-| List units on property | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Create / update unit | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Delete unit | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
-| Upload unit images | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Delete unit images | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Appoint / remove agent | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
-| Portfolio dashboard | ✗ | All | Own | ✗ | ✗ | ✗ | ✗ |
-| **— APPLICATIONS —** | | | | | | | |
-| Submit application | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| List applications | ✗ | All | Own units | ✗ | Own | ✗ | ✗ |
-| Approve / reject application | ✗ | ✓ | Own units | ✗ | ✗ | ✗ | ✗ |
-| Withdraw application | ✗ | ✗ | ✗ | ✗ | Own | ✗ | ✗ |
-| List / create tenant invitations (per unit) | ✗ | All | Own units | Assigned | ✗ | ✗ | ✗ |
-| Resend tenant invitation | ✗ | All | Own units | Assigned | ✗ | ✗ | ✗ |
-| **— LEASES & DOCUMENTS —** | | | | | | | |
-| View / create lease | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| List / upload lease documents | ✗ | ✓ | Own | Assigned | On lease | ✗ | ✗ |
-| Delete lease documents | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Sign lease document | ✗ | ✗ | ✗ | ✗ | On lease | ✗ | ✗ |
-| **— BILLING —** | | | | | | | |
-| View billing config & billing preview | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Create / update billing config | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
-| List / view invoices | ✗ | All | Own | Assigned | Own | ✗ | ✗ |
-| Create invoice (manual) | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Record manual invoice payment | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Pay invoice (Stripe) | ✗ | ✗ | ✗ | ✗ | Own | ✗ | ✗ |
-| View payments & receipts | ✗ | All | Own | Assigned | Own | ✗ | ✗ |
-| Manage charge types | ✗ | ✓ | Own | View only | ✗ | ✗ | ✗ |
-| Record additional income | ✗ | ✓ | Own | View only | ✗ | ✗ | ✗ |
-| Record / view expenses | ✗ | ✓ | Own | View only | ✗ | ✗ | ✗ |
-| Financial reports | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| **— MAINTENANCE —** | | | | | | | |
-| List requests | ✗ | All | Own | Assigned | Own | Open (trade match) | ✗ |
-| Submit request | ✗ | ✓ | Own | ✗ | ✓ | ✗ | ✗ |
-| View request detail | ✗ | ✓ | Own | Assigned | Own | Assigned | ✗ |
-| Open for bidding | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
-| Cancel request | ✗ | ✗ | If submitter | ✗ | If submitter | ✗ | ✗ |
-| Reject request | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
-| Place bid | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| Accept / reject bid | ✗ | ✗ | If submitter | ✗ | If submitter | ✗ | ✗ |
-| Mark in progress | ✗ | ✗ | ✗ | ✗ | ✗ | Assigned | ✗ |
-| Mark completed | ✗ | ✗ | If submitter | ✗ | If submitter | ✗ | ✗ |
-| Add notes / images | ✗ | ✓ | If can view | If can view | If can view | If can view | ✗ |
-| **— NOTIFICATIONS —** | | | | | | | |
-| View & manage own notifications | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **— MESSAGING —** | | | | | | | |
-| Start conversation | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| View / reply in conversation | ✗ | Participant | Participant | Participant | Participant | Participant | Participant |
-| **— DISPUTES —** | | | | | | | |
-| List disputes | ✗ | All | Own | Assigned | Own | ✗ | ✗ |
-| Submit dispute | ✗ | ✓ | Own | ✗ | Active lease | ✗ | ✗ |
-| View dispute detail | ✗ | ✓ | Own | Assigned | Own | ✗ | ✗ |
-| Move to under review | ✗ | ✓ | Own | ✗ | ✗ | ✗ | ✗ |
-| Resolve dispute | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Close dispute | ✗ | ✗ | If creator | ✗ | If creator | ✗ | ✗ |
-| Post dispute message | ✗ | ✓ | Participant | Participant | Participant | ✗ | ✗ |
-| **— REVIEWS —** | | | | | | | |
-| View property reviews | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Write property review | ✗ | ✓ | Own property | ✗ | Active/past lease | ✗ | ✗ |
-| Edit / delete property review | ✗ | ✓ | Own review | ✗ | Own review | ✗ | ✗ |
-| View tenant reviews | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Write tenant review | ✗ | ✗ | Own | Assigned | ✗ | ✗ | ✗ |
-| Edit / delete tenant review | ✗ | ✓ | Own review | Own review | ✗ | ✗ | ✗ |
-| **— MOVING —** | | | | | | | |
-| Browse moving companies | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Create / cancel booking | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
-| Confirm / complete booking | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Own bookings |
-| Write / edit company review | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
-| **— NEIGHBORHOOD INSIGHTS —** | | | | | | | |
-| View insights for a property | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Add insight to a property | ✗ | ✓ | Own | Assigned | ✗ | ✗ | ✗ |
-| Edit / delete insight | ✗ | ✓ | If adder | If adder | ✗ | ✗ | ✗ |
-| **— DASHBOARDS —** | | | | | | | |
-| Admin system overview | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Admin user management | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Admin content moderation | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Tenant dashboard | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| Artisan dashboard | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| Agent dashboard | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
-| Moving company dashboard | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
-| **— MONITORING —** | | | | | | | |
-| View system metrics | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Manage alert rules | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| View / acknowledge / resolve alerts | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Monitoring dashboard | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| Impersonate any non-admin user | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| View impersonation logs | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+| Action                                      | Public | Admin       | Landlord     | Agent       | Tenant            | Artisan            | MovingCompany |
+| ------------------------------------------- | ------ | ----------- | ------------ | ----------- | ----------------- | ------------------ | ------------- |
+| **— ACCOUNT —**                             |        |             |              |             |                   |                    |               |
+| Register / Login / Logout                   | ✓      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Accept tenant invitation (no auth)          | ✓      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| View & update own account                   | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| View & update own role profile              | ✗      | ✗           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Change password                             | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Manage notification preferences             | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| **— PROPERTIES —**                          |        |             |              |             |                   |                    |               |
+| Browse & filter public units                | ✓      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Create / manage saved searches              | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| List properties                             | ✗      | All         | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Create property                             | ✗      | ✓           | ✓            | ✗           | ✗                 | ✗                  | ✗             |
+| View / update property                      | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Delete property                             | ✗      | ✓           | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| List units on property                      | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Create / update unit                        | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Delete unit                                 | ✗      | ✓           | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| Upload unit images                          | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Delete unit images                          | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Appoint / remove agent                      | ✗      | ✓           | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| Portfolio dashboard                         | ✗      | All         | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| **— APPLICATIONS —**                        |        |             |              |             |                   |                    |               |
+| Submit application                          | ✗      | ✗           | ✗            | ✗           | ✓                 | ✗                  | ✗             |
+| List applications                           | ✗      | All         | Own units    | ✗           | Own               | ✗                  | ✗             |
+| Approve / reject application                | ✗      | ✓           | Own units    | ✗           | ✗                 | ✗                  | ✗             |
+| Withdraw application                        | ✗      | ✗           | ✗            | ✗           | Own               | ✗                  | ✗             |
+| List / create tenant invitations (per unit) | ✗      | All         | Own units    | Assigned    | ✗                 | ✗                  | ✗             |
+| Resend tenant invitation                    | ✗      | All         | Own units    | Assigned    | ✗                 | ✗                  | ✗             |
+| **— LEASES & DOCUMENTS —**                  |        |             |              |             |                   |                    |               |
+| View / create lease                         | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| List / upload lease documents               | ✗      | ✓           | Own          | Assigned    | On lease          | ✗                  | ✗             |
+| Delete lease documents                      | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Sign lease document                         | ✗      | ✗           | ✗            | ✗           | On lease          | ✗                  | ✗             |
+| **— BILLING —**                             |        |             |              |             |                   |                    |               |
+| View billing config & billing preview       | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Create / update billing config              | ✗      | ✓           | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| List / view invoices                        | ✗      | All         | Own          | Assigned    | Own               | ✗                  | ✗             |
+| Create invoice (manual)                     | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Record manual invoice payment               | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Pay invoice (Stripe)                        | ✗      | ✗           | ✗            | ✗           | Own               | ✗                  | ✗             |
+| View payments & receipts                    | ✗      | All         | Own          | Assigned    | Own               | ✗                  | ✗             |
+| Manage charge types                         | ✗      | ✓           | Own          | View only   | ✗                 | ✗                  | ✗             |
+| Record additional income                    | ✗      | ✓           | Own          | View only   | ✗                 | ✗                  | ✗             |
+| Record / view expenses                      | ✗      | ✓           | Own          | View only   | ✗                 | ✗                  | ✗             |
+| Financial reports                           | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| **— MAINTENANCE —**                         |        |             |              |             |                   |                    |               |
+| List requests                               | ✗      | All         | Own          | Assigned    | Own               | Open (trade match) | ✗             |
+| Submit request                              | ✗      | ✓           | Own          | ✗           | ✓                 | ✗                  | ✗             |
+| View request detail                         | ✗      | ✓           | Own          | Assigned    | Own               | Assigned           | ✗             |
+| Open for bidding                            | ✗      | ✓           | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| Cancel request                              | ✗      | ✗           | If submitter | ✗           | If submitter      | ✗                  | ✗             |
+| Reject request                              | ✗      | ✓           | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| Place bid                                   | ✗      | ✗           | ✗            | ✗           | ✗                 | ✓                  | ✗             |
+| Accept / reject bid                         | ✗      | ✗           | If submitter | ✗           | If submitter      | ✗                  | ✗             |
+| Mark in progress                            | ✗      | ✗           | ✗            | ✗           | ✗                 | Assigned           | ✗             |
+| Mark completed                              | ✗      | ✗           | If submitter | ✗           | If submitter      | ✗                  | ✗             |
+| Add notes / images                          | ✗      | ✓           | If can view  | If can view | If can view       | If can view        | ✗             |
+| **— NOTIFICATIONS —**                       |        |             |              |             |                   |                    |               |
+| View & manage own notifications             | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| **— MESSAGING —**                           |        |             |              |             |                   |                    |               |
+| Start conversation                          | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| View / reply in conversation                | ✗      | Participant | Participant  | Participant | Participant       | Participant        | Participant   |
+| **— DISPUTES —**                            |        |             |              |             |                   |                    |               |
+| List disputes                               | ✗      | All         | Own          | Assigned    | Own               | ✗                  | ✗             |
+| Submit dispute                              | ✗      | ✓           | Own          | ✗           | Active lease      | ✗                  | ✗             |
+| View dispute detail                         | ✗      | ✓           | Own          | Assigned    | Own               | ✗                  | ✗             |
+| Move to under review                        | ✗      | ✓           | Own          | ✗           | ✗                 | ✗                  | ✗             |
+| Resolve dispute                             | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| Close dispute                               | ✗      | ✗           | If creator   | ✗           | If creator        | ✗                  | ✗             |
+| Post dispute message                        | ✗      | ✓           | Participant  | Participant | Participant       | ✗                  | ✗             |
+| **— REVIEWS —**                             |        |             |              |             |                   |                    |               |
+| View property reviews                       | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Write property review                       | ✗      | ✓           | Own property | ✗           | Active/past lease | ✗                  | ✗             |
+| Edit / delete property review               | ✗      | ✓           | Own review   | ✗           | Own review        | ✗                  | ✗             |
+| View tenant reviews                         | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Write tenant review                         | ✗      | ✗           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Edit / delete tenant review                 | ✗      | ✓           | Own review   | Own review  | ✗                 | ✗                  | ✗             |
+| **— MOVING —**                              |        |             |              |             |                   |                    |               |
+| Browse moving companies                     | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Create / cancel booking                     | ✗      | ✓           | ✓            | ✓           | ✓                 | ✗                  | ✗             |
+| Confirm / complete booking                  | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | Own bookings  |
+| Write / edit company review                 | ✗      | ✓           | ✓            | ✓           | ✓                 | ✗                  | ✗             |
+| **— NEIGHBORHOOD INSIGHTS —**               |        |             |              |             |                   |                    |               |
+| View insights for a property                | ✗      | ✓           | ✓            | ✓           | ✓                 | ✓                  | ✓             |
+| Add insight to a property                   | ✗      | ✓           | Own          | Assigned    | ✗                 | ✗                  | ✗             |
+| Edit / delete insight                       | ✗      | ✓           | If adder     | If adder    | ✗                 | ✗                  | ✗             |
+| **— DASHBOARDS —**                          |        |             |              |             |                   |                    |               |
+| Admin system overview                       | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| Admin user management                       | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| Admin content moderation                    | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| Tenant dashboard                            | ✗      | ✗           | ✗            | ✗           | ✓                 | ✗                  | ✗             |
+| Artisan dashboard                           | ✗      | ✗           | ✗            | ✗           | ✗                 | ✓                  | ✗             |
+| Agent dashboard                             | ✗      | ✗           | ✗            | ✓           | ✗                 | ✗                  | ✗             |
+| Moving company dashboard                    | ✗      | ✗           | ✗            | ✗           | ✗                 | ✗                  | ✓             |
+| **— MONITORING —**                          |        |             |              |             |                   |                    |               |
+| View system metrics                         | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| Manage alert rules                          | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| View / acknowledge / resolve alerts         | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| Monitoring dashboard                        | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| Impersonate any non-admin user              | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+| View impersonation logs                     | ✗      | ✓           | ✗            | ✗           | ✗                 | ✗                  | ✗             |
+
 
 ---
 
 ## Authentication
 
 ### Register
+
 `POST /api/auth/register/`
 
 ```json
@@ -145,6 +148,7 @@ Content-Type: `application/json`
 ---
 
 ### Login
+
 `POST /api/auth/login/`
 
 ```json
@@ -161,6 +165,7 @@ Content-Type: `application/json`
 ```
 
 Store the token and include it on every subsequent request:
+
 ```
 Authorization: Token abc123tokenhere
 ```
@@ -168,6 +173,7 @@ Authorization: Token abc123tokenhere
 ---
 
 ### Accept tenant invitation
+
 `POST /api/auth/tenant-invite/accept/` — **no** `Authorization` header. Use the `token` value from the invite email (query string on the frontend URL is for UX only; the API expects `token` in the JSON body).
 
 ```json
@@ -193,12 +199,14 @@ Authorization: Token abc123tokenhere
 ---
 
 ### Logout
+
 `POST /api/auth/logout/`
 No body required. Returns `200 {}`.
 
 ---
 
 ### Current User
+
 `GET /api/auth/user/`
 
 ```json
@@ -220,7 +228,9 @@ No body required. Returns `200 {}`.
 ---
 
 ### Change Password (authenticated)
+
 `POST /api/auth/password/change/`
+
 ```json
 {
   "old_password": "currentpass",
@@ -228,17 +238,21 @@ No body required. Returns `200 {}`.
   "new_password2": "newpass123"
 }
 ```
+
 Returns `200 {}` on success.
 
 ---
 
 ### Password Reset
+
 `POST /api/auth/password/reset/`
+
 ```json
 { "email": "jane@example.com" }
 ```
 
 `POST /api/auth/password/reset/confirm/`
+
 ```json
 {
   "uid": "<uid from email link>",
@@ -253,6 +267,7 @@ Returns `200 {}` on success.
 ## Account Self-Service
 
 ### Get / Update Your Account
+
 `GET /api/auth/me/`
 `PATCH /api/auth/me/` — send only the fields you want to change
 
@@ -271,11 +286,13 @@ Returns `200 {}` on success.
   "role": 2
 }
 ```
+
 `role` is read-only.
 
 ---
 
 ### Lightweight User Profile Lookup (authenticated)
+
 `GET /api/auth/users/<pk>/profile/`
 
 Useful for non-admin UI surfaces that need to resolve a user's display name/phone without calling admin-only dashboard endpoints.
@@ -296,28 +313,38 @@ Returns `404` when the user does not exist.
 ---
 
 ### Get / Update Your Role Profile
+
 `GET /api/auth/me/profile/`
 `PATCH /api/auth/me/profile/` — send only the fields you want to change
 
 Profile fields vary by role. Admin has no profile — returns `404`.
 
 **Tenant:**
+
 ```json
 { "national_id": "32145678", "emergency_contact_name": "John", "emergency_contact_phone": "+254700000000" }
 ```
+
 **Landlord:**
+
 ```json
 { "company_name": "Bett Properties Ltd", "tax_id": "A001234567B" }
 ```
+
 **Agent:**
+
 ```json
 { "agency_name": "Prime Realtors", "license_number": "RE-2024-001", "commission_rate": "5.00" }
 ```
+
 **Artisan:**
+
 ```json
 { "trade": "plumbing", "bio": "10 years experience." }
 ```
+
 **MovingCompany:**
+
 ```json
 {
   "company_name": "Swift Movers Ltd",
@@ -330,6 +357,7 @@ Profile fields vary by role. Admin has no profile — returns `404`.
   "price_per_km": "50.00"
 }
 ```
+
 `is_verified` and `is_active` are managed by admin.
 
 Profile is auto-created on first `GET` if it doesn't exist yet.
@@ -337,6 +365,7 @@ Profile is auto-created on first `GET` if it doesn't exist yet.
 ---
 
 ### Notification Preferences
+
 `GET /api/auth/me/notifications/`
 `PATCH /api/auth/me/notifications/` — send only the flags you want to change
 
@@ -354,6 +383,7 @@ Profile is auto-created on first `GET` if it doesn't exist yet.
   "updated_at": "2024-03-01T08:00:00Z"
 }
 ```
+
 All flags default to `true`. Preferences are auto-created on first `GET`.
 
 ---
@@ -361,7 +391,9 @@ All flags default to `true`. Preferences are auto-created on first `GET`.
 ## Roles
 
 ### List Roles
+
 `GET /api/auth/roles/`
+
 ```json
 // Response 200
 [
@@ -381,7 +413,9 @@ All flags default to `true`. Preferences are auto-created on first `GET`.
 After registration, users with non-Admin roles should create their profile.
 
 ### Tenant Profile
+
 `POST /api/auth/profiles/tenant/`
+
 ```json
 {
   "user": 5,
@@ -392,7 +426,9 @@ After registration, users with non-Admin roles should create their profile.
 ```
 
 ### Landlord Profile
+
 `POST /api/auth/profiles/landlord/`
+
 ```json
 {
   "user": 3,
@@ -400,10 +436,13 @@ After registration, users with non-Admin roles should create their profile.
   "tax_id": "A001234567B"
 }
 ```
+
 `verified` is read-only (set by admin).
 
 ### Agent Profile
+
 `POST /api/auth/profiles/agent/`
+
 ```json
 {
   "user": 4,
@@ -414,7 +453,9 @@ After registration, users with non-Admin roles should create their profile.
 ```
 
 ### Artisan Profile
+
 `POST /api/auth/profiles/artisan/`
+
 ```json
 {
   "user": 6,
@@ -422,11 +463,14 @@ After registration, users with non-Admin roles should create their profile.
   "bio": "10 years experience in residential plumbing."
 }
 ```
+
 Trade choices: `plumbing`, `electrical`, `carpentry`, `painting`, `masonry`, `other`
 `rating` and `verified` are read-only (system-managed).
 
 ### Moving Company Profile
+
 `POST /api/auth/profiles/moving-company/`
+
 ```json
 {
   "user": 7,
@@ -440,6 +484,7 @@ Trade choices: `plumbing`, `electrical`, `carpentry`, `painting`, `masonry`, `ot
   "price_per_km": "50.00"
 }
 ```
+
 `is_verified` is read-only (set by admin).
 
 ---
@@ -447,8 +492,10 @@ Trade choices: `plumbing`, `electrical`, `carpentry`, `painting`, `masonry`, `ot
 ## Properties
 
 ### List Properties
+
 `GET /api/property/properties/`
 Response is scoped by role automatically:
+
 - **Admin** → all properties
 - **Landlord** → their own properties
 - **Agent** → properties they are assigned to
@@ -474,7 +521,9 @@ Response is scoped by role automatically:
 ```
 
 ### Create Property (Landlord only)
+
 `POST /api/property/properties/`
+
 ```json
 {
   "name": "Sunset Apartments",
@@ -484,13 +533,16 @@ Response is scoped by role automatically:
   "latitude": -1.2921
 }
 ```
+
 Property type choices: `house`, `apartment`, `commercial`, `land`, `bungalow`, `duplex`, `townhouse`, `studio`, `cottage`, `penthouse`, `other`
 
 ### Get / Update Property
+
 `GET /api/property/properties/<pk>/`
 `PUT /api/property/properties/<pk>/` — partial update, only send changed fields
 
 ### Delete Property (Admin / Owner only)
+
 `DELETE /api/property/properties/<pk>/` → `204 No Content`
 
 ---
@@ -498,10 +550,13 @@ Property type choices: `house`, `apartment`, `commercial`, `land`, `bungalow`, `
 ## Units
 
 ### List Units for a Property
+
 `GET /api/property/properties/<pk>/units/`
 
 ### Create Unit (Admin / Owner / Agent)
+
 `POST /api/property/properties/<pk>/units/`
+
 ```json
 {
   "name": "A1",
@@ -519,6 +574,7 @@ Property type choices: `house`, `apartment`, `commercial`, `land`, `bungalow`, `
   "tour_url": "https://my3dtours.com/tour/unit-a1"
 }
 ```
+
 `is_occupied` defaults to `false` (set automatically when a lease is created).
 `property` is set from the URL — do not include it in the body.
 `tour_url` is optional — link to an external 3D/virtual tour.
@@ -526,6 +582,7 @@ Property type choices: `house`, `apartment`, `commercial`, `land`, `bungalow`, `
 > When a unit is updated and `is_public` changes from `false` to `true`, the system automatically checks all saved searches and sends `new_listing` notifications to matching users.
 
 ### Unit Detail / Update / Delete
+
 `GET /api/property/units/<pk>/`
 `PUT /api/property/units/<pk>/` — partial
 `DELETE /api/property/units/<pk>/` — Admin / Owner only
@@ -535,22 +592,25 @@ Property type choices: `house`, `apartment`, `commercial`, `land`, `bungalow`, `
 ## Search & Filtering
 
 ### Browse Public Units
+
 `GET /api/property/units/public/` — no auth required
 
 All query params are optional and can be combined:
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `price_min` | number | Minimum price (inclusive) |
-| `price_max` | number | Maximum price (inclusive) |
-| `bedrooms` | integer | Minimum number of bedrooms |
-| `bathrooms` | integer | Minimum number of bathrooms |
-| `property_type` | string | Exact type — `apartment`, `house`, `studio`, etc. |
-| `amenities` | string | Keyword search within amenities text |
-| `parking` | `true` | Only units with parking |
-| `lat` | float | Latitude of search centre |
-| `lng` | float | Longitude of search centre |
-| `radius_km` | float | Search radius in km (requires `lat` + `lng`) |
+
+| Param           | Type    | Description                                       |
+| --------------- | ------- | ------------------------------------------------- |
+| `price_min`     | number  | Minimum price (inclusive)                         |
+| `price_max`     | number  | Maximum price (inclusive)                         |
+| `bedrooms`      | integer | Minimum number of bedrooms                        |
+| `bathrooms`     | integer | Minimum number of bathrooms                       |
+| `property_type` | string  | Exact type — `apartment`, `house`, `studio`, etc. |
+| `amenities`     | string  | Keyword search within amenities text              |
+| `parking`       | `true`  | Only units with parking                           |
+| `lat`           | float   | Latitude of search centre                         |
+| `lng`           | float   | Longitude of search centre                        |
+| `radius_km`     | float   | Search radius in km (requires `lat` + `lng`)      |
+
 
 ```
 GET /api/property/units/public/?price_max=50000&bedrooms=2&property_type=apartment&lat=-1.2921&lng=36.8172&radius_km=5
@@ -563,11 +623,14 @@ GET /api/property/units/public/?price_max=50000&bedrooms=2&property_type=apartme
 Tenants can save filter criteria and receive `new_listing` notifications when a matching unit is published.
 
 ### List Saved Searches
+
 `GET /api/property/saved-searches/`
 Returns own searches. Admin sees all.
 
 ### Create a Saved Search
+
 `POST /api/property/saved-searches/`
+
 ```json
 {
   "name": "2-bed apartments under 50k in Westlands",
@@ -582,6 +645,7 @@ Returns own searches. Admin sees all.
   "notify_on_match": true
 }
 ```
+
 All `filters` keys are optional — use only the ones relevant to the search.
 
 ```json
@@ -597,6 +661,7 @@ All `filters` keys are optional — use only the ones relevant to the search.
 ```
 
 ### Get / Update / Delete a Saved Search
+
 `GET /api/property/saved-searches/<pk>/`
 `PATCH /api/property/saved-searches/<pk>/` — send only changed fields
 `DELETE /api/property/saved-searches/<pk>/` → `204 No Content`
@@ -604,14 +669,17 @@ All `filters` keys are optional — use only the ones relevant to the search.
 Owner or admin only.
 
 ### Batch re-run matching (management command)
+
 ```bash
 python manage.py match_saved_searches           # units published in last 24h
 python manage.py match_saved_searches --days 7  # last 7 days
 ```
 
 ### Unit Lease
+
 `GET /api/property/units/<pk>/lease/` — get active lease
 `POST /api/property/units/<pk>/lease/` — create lease
+
 ```json
 {
   "tenant": 5,
@@ -621,6 +689,7 @@ python manage.py match_saved_searches --days 7  # last 7 days
   "is_active": true
 }
 ```
+
 `unit` is set from the URL — do not include it in the body.
 
 ---
@@ -628,13 +697,17 @@ python manage.py match_saved_searches --days 7  # last 7 days
 ## Agent Management
 
 ### Appoint Agent to Property (Owner / Admin)
+
 `POST /api/property/properties/<pk>/agents/`
+
 ```json
 { "agent": 4 }
 ```
 
 ### List Agents on Property
+
 `GET /api/property/properties/<pk>/agents/`
+
 ```json
 [
   {
@@ -648,6 +721,7 @@ python manage.py match_saved_searches --days 7  # last 7 days
 ```
 
 ### Remove Agent
+
 `DELETE /api/property/properties/<pk>/agents/<id>/` → `204 No Content`
 
 ---
@@ -692,15 +766,17 @@ Response includes `configured: true`, billing fields, `id`, `property`, `updated
 
 **Core billing fields**
 
-| Field | Notes |
-|-------|--------|
-| `rent_due_day` | 1–28 (calendar day of month for rent). |
-| `grace_period_days` | Added to the rent anchor date to compute each invoice’s `due_date`. |
-| `late_fee_percentage` | Used when `late_fee_mode` is `percentage` (% of `rent_amount`). |
-| `late_fee_max_percentage` | Optional cap on the computed percentage fee; **ignored** when mode is `fixed`. |
-| `invoice_lead_days` | 0–27. Invoice generation runs on day `max(1, clamped_rent_due_day − invoice_lead_days)` in the invoice month (see **Cron: `process_billing`**). `0` preserves legacy behavior (generate on the due day). |
-| `late_fee_mode` | `percentage` (default) or `fixed`. |
-| `late_fee_fixed_amount` | Required when mode is `fixed`; cleared when mode is `percentage`. |
+
+| Field                     | Notes                                                                                                                                                                                                    |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rent_due_day`            | 1–28 (calendar day of month for rent).                                                                                                                                                                   |
+| `grace_period_days`       | Added to the rent anchor date to compute each invoice’s `due_date`.                                                                                                                                      |
+| `late_fee_percentage`     | Used when `late_fee_mode` is `percentage` (% of `rent_amount`).                                                                                                                                          |
+| `late_fee_max_percentage` | Optional cap on the computed percentage fee; **ignored** when mode is `fixed`.                                                                                                                           |
+| `invoice_lead_days`       | 0–27. Invoice generation runs on day `max(1, clamped_rent_due_day − invoice_lead_days)` in the invoice month (see **Cron: `process_billing`**). `0` preserves legacy behavior (generate on the due day). |
+| `late_fee_mode`           | `percentage` (default) or `fixed`.                                                                                                                                                                       |
+| `late_fee_fixed_amount`   | Required when mode is `fixed`; cleared when mode is `percentage`.                                                                                                                                        |
+
 
 **Payment instructions** (optional, non-secret copy for tenants)
 
@@ -780,17 +856,17 @@ When configured, adds real `invoice_lead_days`, `rent_due_day`, `grace_period_da
 
 Run daily (e.g. cron). **Invoices, late fees, and rent reminders are only driven by this command** — not by API calls.
 
-1. **Invoice generation** — For each active lease with a `BillingConfig`, for the **current calendar month**, let `clamped_due = min(rent_due_day, last_day_of_month)` and `generation_day = max(1, clamped_due - invoice_lead_days)`. When `today.day == generation_day`, create the month’s invoice if missing: `period_start` / `period_end` span the month; **rent anchor** = `(year, month, clamped_due)`; **`due_date` = anchor + `grace_period_days`**.
-
+1. **Invoice generation** — For each active lease with a `BillingConfig`, for the **current calendar month**, let `clamped_due = min(rent_due_day, last_day_of_month)` and `generation_day = max(1, clamped_due - invoice_lead_days)`. When `today.day == generation_day`, create the month’s invoice if missing: `period_start` / `period_end` span the month; **rent anchor** = `(year, month, clamped_due)`; `**due_date` = anchor + `grace_period_days`**.
 2. **Late fees** — For `pending` / `partial` invoices with `due_date < today`, mark `overdue` and set `late_fee_amount`: **percentage** mode uses `late_fee_percentage` and optional `late_fee_max_percentage`; **fixed** mode uses `late_fee_fixed_amount` (max fields apply only in percentage mode).
-
 3. **Reminders** — In-app notifications with type `payment_reminder` (email follows `NotificationPreference.payment_due_reminder` when global email notifications are on). At most one log per invoice per kind (`pre_due`, `due_date`, `overdue`) via `ReminderLog`.
 
 ---
 
 ### List Invoices
+
 `GET /api/billing/invoices/`
 Scoped by role:
+
 - **Admin** → all
 - **Landlord** → own properties
 - **Agent** → assigned properties
@@ -813,11 +889,13 @@ Scoped by role:
   }
 ]
 ```
+
 Invoice status values: `pending`, `paid`, `partial`, `overdue`, `cancelled`
 
 ---
 
 ### Create invoice manually (Owner / Assigned Agent / Admin)
+
 `POST /api/billing/invoices/`
 
 Use this to issue a rent invoice outside the automatic `process_billing` schedule (e.g. backfill, proration, or an extra period). The property must already have billing configuration (`POST /api/billing/config/<property_id>/`). The lease must be **active**; the billing period must **overlap** the lease dates (`start_date` / optional `end_date`).
@@ -825,6 +903,7 @@ Use this to issue a rent invoice outside the automatic `process_billing` schedul
 **Who can call:** platform admin, the property owner, or an agent appointed to that property. Tenants and other roles get `403`.
 
 **Constraints:**
+
 - At most one invoice per `(lease, period_start)` — duplicate returns `400`.
 - Omitting `rent_amount` uses the lease’s `rent_amount`; you may override for prorations.
 - New invoices are created with `late_fee_amount = 0`, `status = pending`, `total_amount = rent_amount` (late fees are applied later by `process_billing` when overdue).
@@ -861,17 +940,20 @@ Use this to issue a rent invoice outside the automatic `process_billing` schedul
 
 **Common errors:**
 
-| Situation | Status |
-|-----------|--------|
-| Not owner / assigned agent / admin | `403` |
-| No billing config on the property | `400` — `No billing config set for this property.` |
-| Duplicate `period_start` for that lease | `400` — `An invoice for this lease and period_start already exists.` |
-| Lease inactive or period outside lease dates | `400` — field errors from validation |
-| `period_end` before `period_start` | `400` |
+
+| Situation                                    | Status                                                               |
+| -------------------------------------------- | -------------------------------------------------------------------- |
+| Not owner / assigned agent / admin           | `403`                                                                |
+| No billing config on the property            | `400` — `No billing config set for this property.`                   |
+| Duplicate `period_start` for that lease      | `400` — `An invoice for this lease and period_start already exists.` |
+| Lease inactive or period outside lease dates | `400` — field errors from validation                                 |
+| `period_end` before `period_start`           | `400`                                                                |
+
 
 ---
 
 ### List payments for an invoice
+
 `GET /api/billing/invoices/<pk>/payments/`
 
 Same visibility as invoice detail: **admin**, **property owner**, **assigned agent**, or **tenant on the lease**.
@@ -896,13 +978,15 @@ Manual (non-Stripe) payments use a synthetic `stripe_payment_intent_id` starting
 ---
 
 ### Record manual payment (Owner / Assigned Agent / Admin)
+
 `POST /api/billing/invoices/<pk>/payments/`
 
-Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc.). Creates a **completed** `Payment`, generates a **receipt** (same numbering as Stripe flow), and refreshes the invoice status (`partial` or `paid`). Unless `PropertyBillingNotificationSettings.send_receipt_on_payment` is `false` for the property, the tenant also receives a **`payment`** in-app notification (email follows `NotificationPreference.payment_received` when enabled).
+Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc.). Creates a **completed** `Payment`, generates a **receipt** (same numbering as Stripe flow), and refreshes the invoice status (`partial` or `paid`). Unless `PropertyBillingNotificationSettings.send_receipt_on_payment` is `false` for the property, the tenant also receives a `**payment`** in-app notification (email follows `NotificationPreference.payment_received` when enabled).
 
-**Who can call:** platform admin, property owner, or agent assigned to the property. The tenant must use **`POST .../pay/`** for Stripe instead.
+**Who can call:** platform admin, property owner, or agent assigned to the property. The tenant must use `**POST .../pay/`** for Stripe instead.
 
 **Rules:**
+
 - `amount` is required (decimal string). It must not exceed the **remaining balance** (`total_amount` minus sum of completed payments).
 - Cannot record on a **cancelled** invoice or when the balance is already **zero**.
 - Multiple POSTs are allowed for **partial** payments until the invoice is fully paid.
@@ -934,17 +1018,21 @@ Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc
 }
 ```
 
-| Error | Status |
-|-------|--------|
-| Tenant or unrelated user | `403` |
-| Invoice cancelled | `400` |
-| Balance already zero | `400` |
-| Amount over remaining balance | `400` |
+
+| Error                         | Status |
+| ----------------------------- | ------ |
+| Tenant or unrelated user      | `403`  |
+| Invoice cancelled             | `400`  |
+| Balance already zero          | `400`  |
+| Amount over remaining balance | `400`  |
+
 
 ---
 
 ### Pay Invoice (Tenant only)
+
 `POST /api/billing/invoices/<pk>/pay/`
+
 ```json
 // Request — no body needed
 {}
@@ -958,24 +1046,121 @@ Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc
 ```
 
 **Stripe payment flow:**
+
 1. Call `/pay/` → get `client_secret`
 2. Use Stripe.js `stripe.confirmCardPayment(client_secret, { payment_method: { card: cardElement } })`
-3. Stripe calls the webhook → invoice status updated, receipt auto-generated; tenant **`payment`** notification same rules as manual payments (`send_receipt_on_payment`).
+3. Stripe calls the webhook → invoice status updated, receipt auto-generated; tenant `**payment`** notification same rules as manual payments (`send_receipt_on_payment`).
 
 ---
 
 ### Receipts
-`GET /api/billing/receipts/` — list receipts (scoped by role)
-`GET /api/billing/receipts/<pk>/` — receipt detail
+
+List and detail return the **same object shape** (detail is one list row). Responses include legacy fields plus **enriched** payment, invoice, lease, and property context for receipts UIs.
+
+**Who can access**
+
+- **GET `/api/billing/receipts/`** — **Admin** (all), **Landlord** (own properties), **Agent** (assigned properties), **Tenant** (own leases).
+- **GET `/api/billing/receipts/<pk>/`** — same parties as list, but only if the receipt falls in their scope; otherwise **403**. Unknown id → **404**.
+- **GET `/api/billing/receipts/stats/`** — same roles as list; aggregates only over receipts the user could list.
+
+**List:** DRF-style pagination (default page size **20**, max **100**).
+
+```
+GET /api/billing/receipts/?page=1&page_size=15&property=1&method=mpesa&month=2026-04&search=RCP
+```
+
+**Query parameters (list)**
+
+
+| Param        | Required | Description |
+| ------------ | -------- | ----------- |
+| `property`   | no       | Property PK (positive integer). Restricts to receipts for that property. Invalid non-integer → **400** (`property`). |
+| `method`     | no       | Payment method filter. Allowed values: **`mpesa`**, **`bank`**, **`card`**, **`cash`**, **`other`** (compared case-insensitively). Anything else → **400** (`method`). |
+| `month`      | no       | **`YYYY-MM`** only (e.g. `2026-04`). Filters by calendar month in the **server timezone** on effective time **`Coalesce(payment.paid_at, issued_at)`**. Month must be `01`–`12`. Malformed → **400** (`month`). |
+| `search`     | no       | Case-insensitive substring on receipt number, invoice number, unit name, tenant email, transaction reference, or tenant full name. |
+| `page`       | no       | 1-based page index (default **1**). |
+| `page_size`  | no       | Page size (default **20**). **`max_page_size` = 100** — larger values are **clamped** to 100. |
+
+Filters **combine with AND**. Invalid combinations of params return **400** with field keys mapped to string lists (same pattern as other validated query APIs).
+
+**Stats query parameters**
+
+Optional **`property`** (positive integer) and **`month`** (`YYYY-MM`) with the **same validation rules** as the list endpoint. Scope is the same as list; stats are computed on the filtered receipt set.
+
+**Response: list item / detail (200)**
 
 ```json
 {
-  "id": 1,
-  "payment": 3,
-  "receipt_number": "RCP-202402-0001",
-  "issued_at": "2024-02-15T10:30:00Z"
+  "id": 42,
+  "payment": 99,
+  "receipt_number": "RCP-202604-0001",
+  "issued_at": "2026-04-16T12:00:00Z",
+  "amount": "1500.00",
+  "payment_status": "completed",
+  "paid_at": "2026-04-16T11:30:00Z",
+  "payment_method": "card",
+  "transaction_ref": "TXN-001",
+  "transaction_reference": "TXN-001",
+  "invoice_id": 12,
+  "invoice_number": "INV-000012",
+  "invoice_status": "paid",
+  "invoice_period_start": "2026-04-01",
+  "invoice_period_end": "2026-04-28",
+  "tenant_id": 5,
+  "tenant_name": "Jane Doe",
+  "tenant_email": "jane@example.com",
+  "unit_id": 3,
+  "unit_name": "A1",
+  "property_id": 1,
+  "property_name": "Sunset Apartments",
+  "charge_type": "Rent"
 }
 ```
+
+| Field | Notes |
+| ----- | ----- |
+| `payment` | PK of the related `Payment`. |
+| `transaction_ref` / `transaction_reference` | Same resolved value: `transaction_reference` if set, else `stripe_charge_id`, else `null`. Both keys are returned for frontend compatibility. |
+| `charge_type` | **`Rent`** or **`Rent + Service`** if any `AdditionalIncome` exists for the unit on a date within the invoice period. |
+| `payment_status` | `pending`, `completed`, or `failed`. |
+
+**Response: list page envelope (200)**
+
+```json
+{
+  "count": 128,
+  "next": "http://localhost:8000/api/billing/receipts/?page=2&page_size=15",
+  "previous": null,
+  "results": [ { "...": "same shape as detail above" } ]
+}
+```
+
+**Response: stats (200)**
+
+Exact keys (always present):
+
+```json
+{
+  "total_count": 48,
+  "this_month_count": 6,
+  "this_month_total": "125000.50",
+  "method_breakdown": {
+    "mpesa": 37.5,
+    "bank": 12.5,
+    "card": 25.0,
+    "cash": 12.5,
+    "other": 12.5
+  },
+  "average_amount": "2604.18"
+}
+```
+
+- `total_count` / averages / breakdown are over the **filtered** receipt set (role scope + optional `property` / `month` on stats).
+- `this_month_count` and `this_month_total` use the **current calendar month** in the active timezone and **`Coalesce(paid_at, issued_at)`**.
+- `method_breakdown` values are **percentages** (two decimal places) of receipts by payment method; when `total_count > 0`, they **sum to approximately 100** (rounding).
+- `this_month_total` and `average_amount` are **decimal strings** with two fractional digits.
+
+OpenAPI: **`/api/docs/`**, **`/api/schema/`** — see operation ids `billing_receipt_list`, `billing_receipt_detail`, `billing_receipt_stats`.
 
 ---
 
@@ -984,7 +1169,9 @@ Use when rent was collected **outside Stripe** (cash, M-Pesa, bank transfer, etc
 Tenants browse public units (`GET /api/property/units/public/`) and submit applications. Landlords review and approve or reject.
 
 ### Submit an Application (Tenant only)
+
 `POST /api/property/applications/`
+
 ```json
 {
   "unit": 2,
@@ -995,7 +1182,9 @@ Tenants browse public units (`GET /api/property/units/public/`) and submit appli
   ]
 }
 ```
+
 `documents` is a list of URLs to supporting files (ID copy, payslips, references, etc.). Optional.
+
 - One application per tenant per unit (`400` on duplicate)
 - `400` if unit is already occupied
 
@@ -1014,7 +1203,9 @@ Tenants browse public units (`GET /api/property/units/public/`) and submit appli
 ```
 
 ### List Applications
+
 `GET /api/property/applications/`
+
 - **Landlord** → all applications on their units
 - **Tenant** → their own applications only
 - **Admin** → all
@@ -1023,6 +1214,7 @@ Tenants browse public units (`GET /api/property/units/public/`) and submit appli
 
 **Approve** — auto-creates a lease, marks unit occupied, rejects all other pending applications on the same unit:
 `PUT /api/property/applications/<pk>/`
+
 ```json
 {
   "status": "approved",
@@ -1031,27 +1223,35 @@ Tenants browse public units (`GET /api/property/units/public/`) and submit appli
   "rent_amount": "25000.00"
 }
 ```
+
 `start_date` and `rent_amount` are required. `end_date` is optional (open-ended lease).
 
 **Reject:**
+
 ```json
 { "status": "rejected" }
 ```
 
 ### Withdraw an Application (Tenant only)
+
 `PUT /api/property/applications/<pk>/`
+
 ```json
 { "status": "withdrawn" }
 ```
+
 Only works while status is `pending`.
 
 ### Application Status Values
-| Status | Set by |
-|--------|--------|
-| `pending` | Initial on submission |
-| `approved` | Landlord/Admin |
-| `rejected` | Landlord/Admin (or auto when another application is approved) |
-| `withdrawn` | Applicant |
+
+
+| Status      | Set by                                                        |
+| ----------- | ------------------------------------------------------------- |
+| `pending`   | Initial on submission                                         |
+| `approved`  | Landlord/Admin                                                |
+| `rejected`  | Landlord/Admin (or auto when another application is approved) |
+| `withdrawn` | Applicant                                                     |
+
 
 ---
 
@@ -1127,6 +1327,7 @@ Single endpoint that aggregates the full portfolio view. Scoped automatically �
 ```
 
 **Field notes:**
+
 - `adverts` — units with `is_public=true` and `is_occupied=false` (currently listed/available)
 - `leases_ending_soon` — active leases with `end_date` within 60 days
 - `billing.outstanding` — sum of all unpaid invoices (pending + partial + overdue)
@@ -1140,6 +1341,7 @@ Single endpoint that aggregates the full portfolio view. Scoped automatically �
 Landlords define the income categories they bill tenants for (water, electricity, service charge, etc.) per property. These are used when recording additional income.
 
 ### List Charge Types
+
 `GET /api/billing/properties/<property_pk>/charge-types/`
 
 Query: `?include_inactive=1` (or `true` / `yes`) includes rows with `is_active=false`. By default only **active** types are returned. Ordered by `display_order`, then `id`.
@@ -1167,7 +1369,9 @@ Accessible by: owner, assigned agent, admin.
 `charge_kind`: `fixed`, `variable`, or `per_unit` (UI/metadata; `default_amount` is optional guidance for forms).
 
 ### Create Charge Type (Owner / Admin only)
+
 `POST /api/billing/properties/<property_pk>/charge-types/`
+
 ```json
 {
   "name": "Water",
@@ -1178,12 +1382,14 @@ Accessible by: owner, assigned agent, admin.
   "is_active": true
 }
 ```
+
 `name` must be unique per property. Common examples: `Water`, `Electricity`, `Service Charge`, `Garbage Collection`, `Parking`.
 
 ### Update / Delete
+
 `PUT /api/billing/properties/<property_pk>/charge-types/<pk>/` — partial update; e.g. `{ "name": "New Name", "is_active": false }`
 
-`DELETE /api/billing/properties/<property_pk>/charge-types/<pk>/` → `204 No Content` when the type has **no** `AdditionalIncome` rows. If income exists, **`400`** — set `is_active` to `false` instead of deleting.
+`DELETE /api/billing/properties/<property_pk>/charge-types/<pk>/` → `204 No Content` when the type has **no** `AdditionalIncome` rows. If income exists, `**400`** — set `is_active` to `false` instead of deleting.
 
 ---
 
@@ -1192,6 +1398,7 @@ Accessible by: owner, assigned agent, admin.
 Records income from landlord-defined charges billed to a unit (water meter readings, electricity, etc.).
 
 ### List Additional Income
+
 `GET /api/billing/properties/<property_pk>/additional-income/`
 
 ```json
@@ -1211,7 +1418,9 @@ Records income from landlord-defined charges billed to a unit (water meter readi
 ```
 
 ### Record Additional Income (Owner / Admin only)
+
 `POST /api/billing/properties/<property_pk>/additional-income/`
+
 ```json
 {
   "unit": 2,
@@ -1221,9 +1430,11 @@ Records income from landlord-defined charges billed to a unit (water meter readi
   "description": "March water reading: 12 units"
 }
 ```
+
 Both `unit` and `charge_type` must belong to the same property as the URL.
 
 ### Update / Delete
+
 `PUT /api/billing/properties/<property_pk>/additional-income/<pk>/` — partial, e.g. `{ "amount": "1750.00" }`
 `DELETE /api/billing/properties/<property_pk>/additional-income/<pk>/` → `204 No Content`
 
@@ -1236,6 +1447,7 @@ Records costs incurred by the landlord for a property or unit (insurance, utilit
 > Maintenance expenses are **auto-created** when a maintenance request is marked `completed` — no manual entry needed for those.
 
 ### List Expenses
+
 `GET /api/billing/properties/<property_pk>/expenses/`
 
 ```json
@@ -1271,7 +1483,9 @@ Records costs incurred by the landlord for a property or unit (insurance, utilit
 Expense category choices: `maintenance`, `utility`, `insurance`, `tax`, `repair`, `management_fee`, `other`
 
 ### Record an Expense (Owner / Admin only)
+
 `POST /api/billing/properties/<property_pk>/expenses/`
+
 ```json
 {
   "category": "insurance",
@@ -1280,9 +1494,11 @@ Expense category choices: `maintenance`, `utility`, `insurance`, `tax`, `repair`
   "description": "Annual building insurance premium"
 }
 ```
+
 `unit` is optional (omit for property-wide expenses). `maintenance_request` is optional (auto-set for maintenance completions).
 
 ### Update / Delete
+
 `PUT /api/billing/properties/<property_pk>/expenses/<pk>/` — partial, e.g. `{ "amount": "16500.00" }`
 `DELETE /api/billing/properties/<property_pk>/expenses/<pk>/` → `204 No Content`
 
@@ -1293,9 +1509,11 @@ Expense category choices: `maintenance`, `utility`, `insurance`, `tax`, `repair`
 Computed report aggregating rent income, additional income, and expenses for a property over a period.
 
 ### Monthly Report
+
 `GET /api/billing/reports/<property_pk>/?year=2024&month=3`
 
 ### Annual Report
+
 `GET /api/billing/reports/<property_pk>/?year=2024`
 
 Accessible by: owner, assigned agent, admin. Tenants do not have access.
@@ -1351,22 +1569,25 @@ Accessible by: owner, assigned agent, admin. Tenants do not have access.
 ```
 
 **Field notes:**
+
 - `rent_invoiced` / `late_fees_invoiced` — what was billed in the period (invoices by `period_start`)
 - `total_collected` — actual payments received in the period (payments by `paid_at`)
 - `additional_income` — sum of additional income entries by `date`
 - `total_income` = `total_collected` + `additional_income`
 - `net_income` = `total_income` − `expenses.total`
 - **Occupancy** — physical units on the property (`deleted_at` is null). A unit counts as occupied for a calendar month if it has a lease whose dates overlap that month (`start_date` ≤ last day of month, and `end_date` is null or ≥ first day of month). `occupancy_pct` is `occupied_units / total_units × 100` with two decimal places, or `null` when `total_units` is 0.
-- **`occupancy`** — present for **monthly** reports (`year` + `month`); snapshot for that month only. For **annual** reports (`year` only), this field is `null` (use `occupancy_series` + `occupancy_avg_pct`).
-- **`occupancy_series`** — monthly breakdown: one object when `month` is set; twelve objects (`YYYY-01` … `YYYY-12`) when only `year` is set.
-- **`occupancy_avg_pct`** — for a monthly request, same as that month’s `occupancy.occupancy_pct`. For an annual request, the simple mean of the twelve monthly percentages (months with `total_units = 0` are skipped); `null` if every month had no units.
+- `**occupancy`** — present for **monthly** reports (`year` + `month`); snapshot for that month only. For **annual** reports (`year` only), this field is `null` (use `occupancy_series` + `occupancy_avg_pct`).
+- `**occupancy_series`** — monthly breakdown: one object when `month` is set; twelve objects (`YYYY-01` … `YYYY-12`) when only `year` is set.
+- `**occupancy_avg_pct**` — for a monthly request, same as that month’s `occupancy.occupancy_pct`. For an annual request, the simple mean of the twelve monthly percentages (months with `total_units = 0` are skipped); `null` if every month had no units.
 
 ---
 
 ## Maintenance Requests
 
 ### Submit a Request (Tenant or Landlord)
+
 `POST /api/maintenance/requests/`
+
 ```json
 {
   "property": 1,
@@ -1377,6 +1598,7 @@ Accessible by: owner, assigned agent, admin. Tenants do not have access.
   "priority": "medium"
 }
 ```
+
 `unit` is optional — omit for common-area requests.
 Category choices: `plumbing`, `electrical`, `carpentry`, `painting`, `masonry`, `other`
 Priority choices: `low`, `medium`, `high`, `urgent`
@@ -1384,8 +1606,10 @@ Priority choices: `low`, `medium`, `high`, `urgent`
 ---
 
 ### List Requests
+
 `GET /api/maintenance/requests/`
 Scoped by role:
+
 - **Admin** → all
 - **Landlord** → own properties
 - **Agent** → assigned properties
@@ -1395,6 +1619,7 @@ Scoped by role:
 ---
 
 ### Request Detail
+
 `GET /api/maintenance/requests/<pk>/`
 
 ```json
@@ -1418,26 +1643,32 @@ Scoped by role:
 ---
 
 ### Status Transitions
+
 `PUT /api/maintenance/requests/<pk>/`
+
 ```json
 { "status": "open" }
 ```
 
-| Transition | Who can trigger |
-|---|---|
-| `submitted` → `open` | Property owner (landlord) |
-| `open` → `assigned` | Auto — triggered when submitter accepts a bid |
-| `assigned` → `in_progress` | Assigned artisan |
-| `in_progress` → `completed` | Request submitter (tenant or landlord) |
-| `submitted`/`open` → `cancelled` | Request submitter |
-| any → `rejected` | Property owner |
+
+| Transition                       | Who can trigger                               |
+| -------------------------------- | --------------------------------------------- |
+| `submitted` → `open`             | Property owner (landlord)                     |
+| `open` → `assigned`              | Auto — triggered when submitter accepts a bid |
+| `assigned` → `in_progress`       | Assigned artisan                              |
+| `in_progress` → `completed`      | Request submitter (tenant or landlord)        |
+| `submitted`/`open` → `cancelled` | Request submitter                             |
+| any → `rejected`                 | Property owner                                |
+
 
 ---
 
 ### Bids
 
 #### Artisan Places a Bid (request must be `open`)
+
 `POST /api/maintenance/requests/<pk>/bids/`
+
 ```json
 {
   "proposed_price": "8500.00",
@@ -1463,22 +1694,28 @@ Scoped by role:
 ```
 
 #### List Bids
+
 `GET /api/maintenance/requests/<pk>/bids/`
 Artisans see only their own bid. Submitter, owner, and admin see all bids.
 Each bid response includes artisan metadata:
+
 - `artisan_name`
 - `artisan_rating`
 - `artisan_trade`
 - `artisan_job_count` (completed jobs assigned to that artisan)
 
 #### Accept / Reject a Bid (Submitter only)
+
 `PUT /api/maintenance/requests/<pk>/bids/<bid_id>/`
+
 ```json
 { "status": "accepted" }
 // or
 { "status": "rejected" }
 ```
+
 Accepting a bid automatically:
+
 - Sets request status to `assigned`
 - Sets `assigned_to` to the winning artisan
 - Rejects all other bids on this request
@@ -1486,6 +1723,7 @@ Accepting a bid automatically:
 ---
 
 ### Maintenance Request Timeline
+
 `GET /api/maintenance/requests/<pk>/timeline/`
 
 Returns chronological activity events for the request (request creation, bids, notes, status changes, and related maintenance notifications).
@@ -1516,8 +1754,10 @@ Returns chronological activity events for the request (request creation, bids, n
 ---
 
 ### Notes
+
 `GET /api/maintenance/requests/<pk>/notes/`
 `POST /api/maintenance/requests/<pk>/notes/`
+
 ```json
 // Request
 { "note": "Artisan confirmed arrival for Tuesday 10am." }
@@ -1535,8 +1775,10 @@ Returns chronological activity events for the request (request creation, bids, n
 ---
 
 ### Images on Unit
+
 `GET /api/property/units/<unit_id>/images/` — list all images for a unit
 `POST /api/property/units/<unit_id>/images/` — upload a new image (Admin / Owner / Agent)
+
 ```json
 // POST Request — multipart/form-data
 { "image": <binary_file> }
@@ -1558,12 +1800,15 @@ Returns chronological activity events for the request (request creation, bids, n
 ---
 
 ### Images on Maintenance Request
+
 `GET /api/maintenance/requests/<pk>/images/`
 `POST /api/maintenance/requests/<pk>/images/` — `multipart/form-data`
 
-| Field | Type |
-|-------|------|
+
+| Field   | Type |
+| ------- | ---- |
 | `image` | file |
+
 
 ```json
 // Response 201
@@ -1583,6 +1828,7 @@ Returns chronological activity events for the request (request creation, bids, n
 Attached to a specific lease. Stores a URL to the document (no file upload — supply a pre-hosted URL).
 
 ### List Documents for a Lease (Owner / Agent / Tenant on that lease)
+
 `GET /api/property/leases/<lease_id>/documents/`
 
 ```json
@@ -1603,7 +1849,9 @@ Attached to a specific lease. Stores a URL to the document (no file upload — s
 ```
 
 ### Upload a Document (Owner / Agent)
+
 `POST /api/property/leases/<lease_id>/documents/`
+
 ```json
 {
   "document_type": "lease_agreement",
@@ -1611,9 +1859,11 @@ Attached to a specific lease. Stores a URL to the document (no file upload — s
   "file_url": "https://storage.example.com/docs/lease-a1-2024.pdf"
 }
 ```
+
 Document type choices: `lease_agreement`, `addendum`, `notice`, `inspection_report`, `other`
 
 ### Get a Document (Owner / Agent / Tenant on that lease)
+
 `GET /api/property/leases/<lease_id>/documents/<doc_id>/`
 
 ```json
@@ -1632,11 +1882,13 @@ Document type choices: `lease_agreement`, `addendum`, `notice`, `inspection_repo
 ```
 
 ### Delete a Document (Owner / Agent only)
+
 `DELETE /api/property/leases/<lease_id>/documents/<doc_id>/` → `204 No Content`
 
 Only the property owner or assigned agent can delete documents. Tenants cannot delete.
 
 ### Sign a Document (Tenant on that lease)
+
 `POST /api/property/leases/<lease_id>/documents/<doc_id>/sign/`
 No body required. Sets `signed_by` and `signed_at` on the document.
 Returns `400` if the document is already signed.
@@ -1648,6 +1900,7 @@ Returns `400` if the document is already signed.
 Tenants and landlords rate a property (1–5 stars). One review per user per property.
 
 ### List Reviews for a Property (any authenticated user)
+
 `GET /api/property/properties/<property_id>/reviews/`
 
 ```json
@@ -1665,22 +1918,28 @@ Tenants and landlords rate a property (1–5 stars). One review per user per pro
 ```
 
 ### Submit a Review (Tenant or Landlord)
+
 `POST /api/property/properties/<property_id>/reviews/`
+
 ```json
 {
   "rating": 4,
   "comment": "Great location, responsive landlord."
 }
 ```
+
 - `rating` must be 1–5
 - One review per user per property (`400` on duplicate)
 - Tenant must have an active or past lease on the property; Landlord must own it
 
 ### Update / Delete Your Own Review
+
 `PATCH /api/property/properties/<property_id>/reviews/<review_id>/`
+
 ```json
 { "rating": 5, "comment": "Updated review." }
 ```
+
 `DELETE /api/property/properties/<property_id>/reviews/<review_id>/` → `204 No Content`
 
 Only the reviewer or an admin can edit/delete.
@@ -1692,6 +1951,7 @@ Only the reviewer or an admin can edit/delete.
 Landlords and agents review tenants (1–5 stars). Per reviewer per tenant per property.
 
 ### List Tenant Reviews on a Property (Owner / Agent / Admin)
+
 `GET /api/property/properties/<property_id>/tenant-reviews/`
 
 ```json
@@ -1709,10 +1969,13 @@ Landlords and agents review tenants (1–5 stars). Per reviewer per tenant per p
   }
 ]
 ```
+
 PII is not exposed — only name is returned for reviewer and tenant.
 
 ### Submit a Tenant Review (Landlord / Agent)
+
 `POST /api/property/properties/<property_id>/tenant-reviews/`
+
 ```json
 {
   "tenant": 5,
@@ -1720,10 +1983,12 @@ PII is not exposed — only name is returned for reviewer and tenant.
   "comment": "Excellent tenant, always pays on time."
 }
 ```
+
 - `rating` must be 1–5
 - Tenant must have a lease on the property
 
 ### Update / Delete Your Own Tenant Review
+
 `PATCH /api/property/properties/<property_id>/tenant-reviews/<review_id>/`
 `DELETE /api/property/properties/<property_id>/tenant-reviews/<review_id>/` → `204 No Content`
 
@@ -1734,6 +1999,7 @@ PII is not exposed — only name is returned for reviewer and tenant.
 In-app notifications for the authenticated user. Delivered by the system on key events (payments, applications, maintenance updates, etc.).
 
 ### List Notifications
+
 `GET /api/notifications/` — returns all notifications, newest first
 `GET /api/notifications/?unread=true` — unread only
 
@@ -1751,13 +2017,15 @@ In-app notifications for the authenticated user. Delivered by the system on key 
 ]
 ```
 
-API `notification_type` values (see `Notification` model): `message`, `maintenance`, `payment`, `payment_reminder`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`. Rent due / overdue reminders from `process_billing` use **`payment_reminder`**; receipt-after-payment uses **`payment`**.
+API `notification_type` values (see `Notification` model): `message`, `maintenance`, `payment`, `payment_reminder`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`. Rent due / overdue reminders from `process_billing` use `**payment_reminder**`; receipt-after-payment uses `**payment**`.
 
 ### Mark One Notification as Read
+
 `POST /api/notifications/<pk>/read/`
 No body. Returns `200 { "status": "ok" }`.
 
 ### Mark All as Read
+
 `POST /api/notifications/read-all/`
 No body. Returns `200 { "status": "ok" }`.
 
@@ -1768,6 +2036,7 @@ No body. Returns `200 { "status": "ok" }`.
 Polling-based messaging between users. Conversations can optionally be tied to a property.
 
 ### List Your Conversations
+
 `GET /api/messaging/conversations/`
 
 ```json
@@ -1795,7 +2064,9 @@ Polling-based messaging between users. Conversations can optionally be tied to a
 ```
 
 ### Start a Conversation
+
 `POST /api/messaging/conversations/`
+
 ```json
 {
   "subject": "Question about Unit A1",
@@ -1803,12 +2074,15 @@ Polling-based messaging between users. Conversations can optionally be tied to a
   "participant_ids": [3, 5]
 }
 ```
+
 `property` is optional. `participant_ids` is a list of user IDs to add (you are added automatically).
 
 ### Get a Conversation
+
 `GET /api/messaging/conversations/<pk>/`
 
 ### List Messages
+
 `GET /api/messaging/conversations/<pk>/messages/`
 
 ```json
@@ -1824,12 +2098,15 @@ Polling-based messaging between users. Conversations can optionally be tied to a
 ```
 
 ### Send a Message
+
 `POST /api/messaging/conversations/<pk>/messages/`
+
 ```json
 { "body": "Is the unit still available?" }
 ```
 
 ### Mark Conversation as Read
+
 `POST /api/messaging/conversations/<pk>/read/`
 No body. Updates `last_read_at` for your participant record.
 
@@ -1840,15 +2117,19 @@ No body. Updates `last_read_at` for your participant record.
 Tenants and landlords can raise disputes linked to a property. Agents can view disputes for their assigned properties.
 
 ### List Disputes
+
 `GET /api/disputes/`
 Scoped by role:
+
 - **Admin** → all
 - **Landlord** → disputes on their properties
 - **Agent** → disputes on their assigned properties
 - **Tenant** → their own submitted disputes
 
 ### Raise a Dispute (Tenant or Landlord)
+
 `POST /api/disputes/`
+
 ```json
 {
   "property": 1,
@@ -1858,6 +2139,7 @@ Scoped by role:
   "description": "My rent statement shows an amount higher than what was agreed in the lease."
 }
 ```
+
 `unit` is optional. Dispute type choices: `rent`, `maintenance`, `noise`, `damage`, `lease`, `other`
 
 - Tenant must have an active lease on the property
@@ -1882,25 +2164,31 @@ Scoped by role:
 ```
 
 ### Get a Dispute
+
 `GET /api/disputes/<pk>/`
 
 ### Update Dispute Status (PATCH)
+
 `PATCH /api/disputes/<pk>/`
+
 ```json
 { "status": "under_review" }
 ```
 
-| Transition | Who |
-|---|---|
-| `open` → `under_review` | Property owner or Admin |
-| `under_review` → `resolved` | Admin only |
-| `open`/`under_review` → `closed` | Dispute creator |
+
+| Transition                       | Who                     |
+| -------------------------------- | ----------------------- |
+| `open` → `under_review`          | Property owner or Admin |
+| `under_review` → `resolved`      | Admin only              |
+| `open`/`under_review` → `closed` | Dispute creator         |
+
 
 Resolved and closed disputes cannot be reopened.
 
 ### Dispute Messages
 
 #### List Messages
+
 `GET /api/disputes/<pk>/messages/`
 
 ```json
@@ -1917,7 +2205,9 @@ Resolved and closed disputes cannot be reopened.
 ```
 
 #### Post a Message (any dispute participant)
+
 `POST /api/disputes/<pk>/messages/`
+
 ```json
 { "body": "I have attached the original signed lease for reference." }
 ```
@@ -1927,6 +2217,7 @@ Resolved and closed disputes cannot be reopened.
 ## Moving Companies
 
 ### Browse Moving Companies (any authenticated user)
+
 `GET /api/moving/companies/`
 Returns all active companies (`is_active=true`).
 
@@ -1952,6 +2243,7 @@ Returns all active companies (`is_active=true`).
 ```
 
 ### Get Company Detail
+
 `GET /api/moving/companies/<pk>/`
 
 ---
@@ -1959,7 +2251,9 @@ Returns all active companies (`is_active=true`).
 ### Bookings
 
 #### Create a Booking (any authenticated user)
+
 `POST /api/moving/bookings/`
+
 ```json
 {
   "company": 1,
@@ -1990,20 +2284,25 @@ Returns all active companies (`is_active=true`).
 ```
 
 #### List Bookings
+
 `GET /api/moving/bookings/`
+
 - **MovingCompany** → all bookings made with their company
 - **Others** → their own bookings as customer
 
 #### Update Booking Status
+
 `PUT /api/moving/bookings/<pk>/`
 
-| Transition | Who |
-|---|---|
-| `pending` → `confirmed` | Company |
-| `pending` → `cancelled` | Customer or Company |
-| `confirmed` → `in_progress` | Company |
-| `confirmed` → `cancelled` | Customer or Company |
-| `in_progress` → `completed` | Company |
+
+| Transition                  | Who                 |
+| --------------------------- | ------------------- |
+| `pending` → `confirmed`     | Company             |
+| `pending` → `cancelled`     | Customer or Company |
+| `confirmed` → `in_progress` | Company             |
+| `confirmed` → `cancelled`   | Customer or Company |
+| `in_progress` → `completed` | Company             |
+
 
 ```json
 // Company confirms and sets price estimate
@@ -2018,6 +2317,7 @@ Returns all active companies (`is_active=true`).
 ### Moving Company Reviews
 
 #### List Reviews for a Company
+
 `GET /api/moving/companies/<pk>/reviews/`
 
 ```json
@@ -2036,7 +2336,9 @@ Returns all active companies (`is_active=true`).
 ```
 
 #### Write a Review (any authenticated user)
+
 `POST /api/moving/companies/<pk>/reviews/`
+
 ```json
 {
   "rating": 4,
@@ -2044,15 +2346,19 @@ Returns all active companies (`is_active=true`).
   "booking": 1
 }
 ```
+
 - `rating` must be 1–5
 - `booking` is optional — link to the actual booking for context
 - One review per user per company (`400` on duplicate)
 
 #### Update / Delete Own Review
+
 `PATCH /api/moving/companies/<pk>/reviews/<review_id>/`
+
 ```json
 { "rating": 5, "comment": "Even better on reflection." }
 ```
+
 `DELETE /api/moving/companies/<pk>/reviews/<review_id>/` → `204 No Content`
 
 Reviewer or Admin only.
@@ -2064,6 +2370,7 @@ Reviewer or Admin only.
 Landlords and agents can attach points of interest to a property to help tenants understand the neighborhood.
 
 ### List Insights for a Property (any authenticated user)
+
 `GET /api/neighborhood/properties/<property_id>/insights/`
 
 Optional filter: `?type=school` — filter by insight type.
@@ -2091,7 +2398,9 @@ Optional filter: `?type=school` — filter by insight type.
 Insight type choices: `school`, `hospital`, `safety`, `transit`, `restaurant`, `other`
 
 ### Add an Insight (Owner / Assigned Agent / Admin)
+
 `POST /api/neighborhood/properties/<property_id>/insights/`
+
 ```json
 {
   "insight_type": "hospital",
@@ -2104,6 +2413,7 @@ Insight type choices: `school`, `hospital`, `safety`, `transit`, `restaurant`, `
   "notes": "Level 6 hospital with 24/7 A&E"
 }
 ```
+
 All fields except `insight_type` and `name` are optional.
 
 ```json
@@ -2118,15 +2428,19 @@ All fields except `insight_type` and `name` are optional.
 ```
 
 ### Get Insight Detail (any authenticated user)
+
 `GET /api/neighborhood/properties/<property_id>/insights/<insight_id>/`
 
 ### Update an Insight (Adder or Admin)
+
 `PATCH /api/neighborhood/properties/<property_id>/insights/<insight_id>/`
+
 ```json
 { "rating": "4.8", "notes": "Expanded A&E wing in 2025" }
 ```
 
 ### Delete an Insight (Adder or Admin)
+
 `DELETE /api/neighborhood/properties/<property_id>/insights/<insight_id>/` → `204 No Content`
 
 ---
@@ -2140,6 +2454,7 @@ All dashboard endpoints are read-only aggregations computed on the fly. Each is 
 ### Admin Dashboard
 
 #### System Overview
+
 `GET /api/dashboard/admin/`
 
 ```json
@@ -2195,11 +2510,14 @@ All dashboard endpoints are read-only aggregations computed on the fly. Each is 
 `GET /api/dashboard/admin/users/`
 
 Optional query params:
-| Param | Description |
-|-------|-------------|
-| `role` | Filter by role name — e.g. `?role=Tenant` |
-| `search` | Search username, email, first name, last name |
-| `is_active` | `true` or `false` |
+
+
+| Param       | Description                                   |
+| ----------- | --------------------------------------------- |
+| `role`      | Filter by role name — e.g. `?role=Tenant`     |
+| `search`    | Search username, email, first name, last name |
+| `is_active` | `true` or `false`                             |
+
 
 ```json
 // Response 200
@@ -2247,6 +2565,7 @@ Optional query params:
 
 **Update User Role / Active Status**
 `PUT /api/dashboard/admin/users/<pk>/`
+
 ```json
 // Change role (logs the change in RoleChangeLog)
 { "role": 3, "reason": "Upgraded from tenant to landlord" }
@@ -2257,6 +2576,7 @@ Optional query params:
 // Both at once
 { "role": 3, "is_active": true, "reason": "Account correction" }
 ```
+
 - `reason` is optional free text stored in the role change log
 - Role change is logged only when the new role differs from the current role
 - Only the FK is updated — no profile migration is performed
@@ -2341,6 +2661,7 @@ Returns a unified list of both `PropertyReview` and `TenantReview` records sorte
   }
 }
 ```
+
 `active_lease` is `null` if the tenant has no active lease. `next_due` is `null` if no pending/partial invoices exist.
 
 ---
@@ -2382,6 +2703,7 @@ Returns a unified list of both `PropertyReview` and `TenantReview` records sorte
   "completed_this_month": 4
 }
 ```
+
 `open_jobs` returns up to 10 most recent open requests matching the artisan's registered trade.
 
 ---
@@ -2455,30 +2777,37 @@ Returns `404` if the user has not yet created a company profile via `PATCH /api/
 
 ## Docs & Schema
 
-| URL | Description |
-|-----|-------------|
-| `/api/docs/` | Swagger UI — interactive API explorer |
-| `/api/redoc/` | ReDoc — clean reference docs |
-| `/api/schema/` | Download OpenAPI YAML schema |
+
+| URL            | Description                           |
+| -------------- | ------------------------------------- |
+| `/api/docs/`   | Swagger UI — interactive API explorer |
+| `/api/redoc/`  | ReDoc — clean reference docs          |
+| `/api/schema/` | Download OpenAPI YAML schema          |
+
 
 ---
 
 ## Error Responses
 
 All errors follow this structure:
+
 ```json
 { "detail": "Human-readable error message." }
 ```
 
 Common status codes:
-| Code | Meaning |
-|------|---------|
-| 400 | Validation error — check field-level detail in response body |
-| 401 | Missing or invalid token |
-| 403 | Authenticated but not allowed (wrong role or ownership) |
-| 404 | Resource not found |
+
+
+| Code | Meaning                                                      |
+| ---- | ------------------------------------------------------------ |
+| 400  | Validation error — check field-level detail in response body |
+| 401  | Missing or invalid token                                     |
+| 403  | Authenticated but not allowed (wrong role or ownership)      |
+| 404  | Resource not found                                           |
+
 
 Validation errors return field-level detail:
+
 ```json
 {
   "proposed_price": ["This field is required."],
@@ -2495,9 +2824,11 @@ All endpoints require `is_staff=True`. Non-admin users receive `403`.
 ---
 
 ### List System Metrics
+
 `GET /api/monitoring/metrics/`
 
 Query params:
+
 - `metric_type` — filter to one metric type
 - `hours` — lookback window (default `24`)
 
@@ -2526,6 +2857,7 @@ Metrics are written by the `record_metrics` management command. There are no met
 ---
 
 ### List Alert Rules
+
 `GET /api/monitoring/alert-rules/`
 
 ```json
@@ -2551,6 +2883,7 @@ Six default rules are seeded on first migration. `created_by` is `null` for seed
 ---
 
 ### Create Alert Rule
+
 `POST /api/monitoring/alert-rules/`
 
 ```json
@@ -2585,6 +2918,7 @@ Six default rules are seeded on first migration. `created_by` is `null` for seed
 ---
 
 ### Update / Delete Alert Rule
+
 `PATCH /api/monitoring/alert-rules/<pk>/`
 
 ```json
@@ -2600,9 +2934,11 @@ Six default rules are seeded on first migration. `created_by` is `null` for seed
 ---
 
 ### List Alert Instances
+
 `GET /api/monitoring/alerts/`
 
 Query params:
+
 - `status` — `triggered` | `acknowledged` | `resolved`
 - `severity` — `info` | `warning` | `critical`
 - `hours` — lookback window (default `72`)
@@ -2631,6 +2967,7 @@ Query params:
 ---
 
 ### Acknowledge / Resolve an Alert
+
 `PATCH /api/monitoring/alerts/<pk>/`
 
 **Status machine:** `triggered → acknowledged → resolved` (terminal). Cannot transition backwards.
@@ -2659,6 +2996,7 @@ Alerts can also be auto-resolved by the `check_alert_rules` command when the met
 ---
 
 ### Monitoring Dashboard
+
 `GET /api/monitoring/dashboard/`
 
 Single endpoint for an at-a-glance health overview. Suitable for a status page or ops widget.
@@ -2704,14 +3042,15 @@ Single endpoint for an at-a-glance health overview. Suitable for a status page o
 }
 ```
 
-**`health_status` values:**
+`**health_status` values:**
+
 - `healthy` — no active (triggered or acknowledged) alerts
 - `warning` — at least one active warning-severity alert, no critical
 - `critical` — at least one active critical-severity alert
 
-**`latest_metrics`** — only keys with recorded data appear. If `record_metrics` has never run, this object will be empty.
+`**latest_metrics`** — only keys with recorded data appear. If `record_metrics` has never run, this object will be empty.
 
-**`trends`** — last 24 hours of data points for `overdue_invoice_count`, `monthly_revenue`, and `occupancy_rate`, in chronological order.
+`**trends**` — last 24 hours of data points for `overdue_invoice_count`, `monthly_revenue`, and `occupancy_rate`, in chronological order.
 
 ---
 
@@ -2744,6 +3083,7 @@ X-Impersonate-User: 42
 The response will be exactly as if user 42 made the request — scoped data, role-based permissions, everything. Your admin token is still used for authentication; only `request.user` is swapped.
 
 **Rules:**
+
 - Requester must be `is_staff=True`
 - Target user must be active (`is_active=True`) and non-admin (`is_staff=False`)
 - Attempting to impersonate another admin returns `403`
@@ -2751,6 +3091,7 @@ The response will be exactly as if user 42 made the request — scoped data, rol
 - Omitting the header uses your own identity normally
 
 **Example — view a tenant's invoices as that tenant:**
+
 ```
 GET /api/billing/invoices/
 Authorization: Token <admin-token>
@@ -2762,9 +3103,11 @@ Returns only the invoices that belong to user 42, exactly as that tenant would s
 ---
 
 ### View Impersonation Logs
+
 `GET /api/monitoring/impersonation-logs/`
 
 Query params:
+
 - `target_user` — filter by target user PK
 - `hours` — lookback window (default `72`)
 
