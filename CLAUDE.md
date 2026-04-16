@@ -179,6 +179,7 @@ Seeded via data migrations. Roles are:
 | GET/PATCH | `/api/auth/me/` | View / update own account (name, email, phone) |
 | GET/PATCH | `/api/auth/me/profile/` | View / update own role profile (auto-creates if missing) |
 | GET/PATCH | `/api/auth/me/notifications/` | View / update notification preferences (auto-creates if missing) |
+| GET | `/api/auth/users/<pk>/profile/` | Lightweight user profile lookup for any authenticated user (`id`, `first_name`, `last_name`, `phone`, `role`) |
 | GET/POST | `/api/auth/roles/` | List / create roles |
 | GET/PUT/DELETE | `/api/auth/roles/<pk>/` | Role detail |
 | GET/POST | `/api/auth/profiles/tenant/` | List / create tenant profiles |
@@ -252,9 +253,10 @@ Seeded via data migrations. Roles are:
 | POST | `/api/maintenance/requests/` | Tenant or Landlord only (Agents and Artisans cannot submit) |
 | GET | `/api/maintenance/requests/<pk>/` | Submitter, property owner, assigned agent, assigned artisan, admin |
 | PUT | `/api/maintenance/requests/<pk>/` | Status transitions (see below) or field edits (submitter/admin only) |
-| GET | `/api/maintenance/requests/<pk>/bids/` | Artisan=own bid, others=all bids if can_view_request |
+| GET | `/api/maintenance/requests/<pk>/bids/` | Artisan=own bid, others=all bids if can_view_request; includes `artisan_name`, `artisan_rating`, `artisan_trade`, `artisan_job_count` |
 | POST | `/api/maintenance/requests/<pk>/bids/` | Artisan only, request must be `open`, one bid per artisan |
 | PUT | `/api/maintenance/requests/<pk>/bids/<bid_id>/` | Submitter only — `{"status": "accepted"}` or `{"status": "rejected"}` |
+| GET | `/api/maintenance/requests/<pk>/timeline/` | Request activity timeline events (`event_type`, `description`, `actor`, `created_at`) |
 | GET/POST | `/api/maintenance/requests/<pk>/notes/` | Anyone who can view the request |
 | GET/POST | `/api/maintenance/requests/<pk>/images/` | Anyone who can view the request |
 

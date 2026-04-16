@@ -275,6 +275,26 @@ Returns `200 {}` on success.
 
 ---
 
+### Lightweight User Profile Lookup (authenticated)
+`GET /api/auth/users/<pk>/profile/`
+
+Useful for non-admin UI surfaces that need to resolve a user's display name/phone without calling admin-only dashboard endpoints.
+
+```json
+// Response 200
+{
+  "id": 5,
+  "first_name": "Jane",
+  "last_name": "Doe",
+  "phone": "+254712345678",
+  "role": "Tenant"
+}
+```
+
+Returns `404` when the user does not exist.
+
+---
+
 ### Get / Update Your Role Profile
 `GET /api/auth/me/profile/`
 `PATCH /api/auth/me/profile/` — send only the fields you want to change
@@ -1431,6 +1451,10 @@ Scoped by role:
   "id": 3,
   "request": 1,
   "artisan": 6,
+  "artisan_name": "Chris Plumber",
+  "artisan_rating": "4.80",
+  "artisan_trade": "Plumbing",
+  "artisan_job_count": 94,
   "proposed_price": "8500.00",
   "message": "I can fix this within 2 days using quality materials.",
   "status": "pending",
@@ -1441,6 +1465,11 @@ Scoped by role:
 #### List Bids
 `GET /api/maintenance/requests/<pk>/bids/`
 Artisans see only their own bid. Submitter, owner, and admin see all bids.
+Each bid response includes artisan metadata:
+- `artisan_name`
+- `artisan_rating`
+- `artisan_trade`
+- `artisan_job_count` (completed jobs assigned to that artisan)
 
 #### Accept / Reject a Bid (Submitter only)
 `PUT /api/maintenance/requests/<pk>/bids/<bid_id>/`
@@ -1453,6 +1482,36 @@ Accepting a bid automatically:
 - Sets request status to `assigned`
 - Sets `assigned_to` to the winning artisan
 - Rejects all other bids on this request
+
+---
+
+### Maintenance Request Timeline
+`GET /api/maintenance/requests/<pk>/timeline/`
+
+Returns chronological activity events for the request (request creation, bids, notes, status changes, and related maintenance notifications).
+
+```json
+[
+  {
+    "event_type": "request_submitted",
+    "description": "Maintenance request submitted: Leaking kitchen tap.",
+    "actor": "Jane Doe",
+    "created_at": "2024-03-01T09:00:00Z"
+  },
+  {
+    "event_type": "bid_submitted",
+    "description": "Chris Plumber submitted a bid of KES 8500.00.",
+    "actor": "Chris Plumber",
+    "created_at": "2024-03-02T11:00:00Z"
+  },
+  {
+    "event_type": "notification_sent",
+    "description": "Maintenance Update: You were notified via push and email.",
+    "actor": "Jane Doe",
+    "created_at": "2024-03-02T11:05:00Z"
+  }
+]
+```
 
 ---
 
