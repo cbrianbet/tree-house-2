@@ -233,7 +233,7 @@ Seeded via data migrations. Roles are:
 | GET/POST | `/api/billing/invoices/` | GET: Admin=all, Landlord=own properties, Agent=assigned, Tenant=own — POST: Admin / property owner / assigned agent (requires billing config on property; body: `lease`, `period_start`, `period_end`, `due_date`, optional `rent_amount`) |
 | GET | `/api/billing/invoices/<pk>/` | Owner/Agent/Tenant |
 | POST | `/api/billing/invoices/<pk>/pay/` | Tenant only |
-| GET/POST | `/api/billing/invoices/<pk>/payments/` | GET: Owner/Agent/Tenant — POST: record manual payment (cash/bank); Owner/Assigned Agent/Admin only; body `amount`; creates completed `Payment` (`stripe_payment_intent_id` prefix `manual-`), receipt, updates invoice status |
+| GET/POST | `/api/billing/invoices/<pk>/payments/` | GET: Owner/Agent/Tenant — POST: record manual payment; Owner/Assigned Agent/Admin only; body `amount` (required), optional `payment_method` (default `cash`), `fee_amount` (≥0, not counted toward invoice balance), `transaction_reference`; creates completed `Payment` (`stripe_payment_intent_id` prefix `manual-`), receipt, updates invoice status |
 | GET | `/api/billing/receipts/` | Admin=all, Landlord=own, Agent=assigned, Tenant=own — paginated `{count,next,previous,results}`; query: `property`, `method` (`mpesa`\|`bank`\|`card`\|`cash`\|`other`), `month` (`YYYY-MM`), `search`, `page`, `page_size` (default 20, max 100); each result = enriched receipt + legacy `id`/`payment`/`receipt_number`/`issued_at` |
 | GET | `/api/billing/receipts/<pk>/` | Same enriched shape as list row; 403 out of scope, 404 missing |
 | GET | `/api/billing/receipts/stats/` | Same role scope; optional `property`, `month`; `{total_count,this_month_count,this_month_total,method_breakdown,average_amount}` |

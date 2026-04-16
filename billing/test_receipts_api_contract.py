@@ -21,7 +21,7 @@ from billing.receipt_contract_factories import (
 
 
 RECEIPT_ENRICHED_KEYS = frozenset({
-    'amount', 'payment_status', 'paid_at', 'payment_method', 'transaction_ref',
+    'amount', 'fee_amount', 'payment_status', 'paid_at', 'payment_method', 'transaction_ref',
     'transaction_reference', 'invoice_id', 'invoice_number', 'invoice_status',
     'invoice_period_start', 'invoice_period_end', 'tenant_id', 'tenant_name',
     'tenant_email', 'unit_id', 'unit_name', 'property_id', 'property_name', 'charge_type',

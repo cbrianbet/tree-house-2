@@ -546,6 +546,111 @@ class ManualPaymentRecordTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
+    def test_default_payment_method_is_cash(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['payment']['payment_method'], 'cash')
+        self.assertEqual(response.data['payment']['fee_amount'], '0.00')
+
+    def test_payment_method_normalized_case_insensitive(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00', 'payment_method': 'MPEsa'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['payment']['payment_method'], 'mpesa')
+
+    def test_manual_payment_with_fee_and_reference(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {
+                'amount': '45000.00',
+                'payment_method': 'bank',
+                'fee_amount': '150.00',
+                'transaction_reference': 'QHJ7K2MN01',
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['payment']['amount'], '45000.00')
+        self.assertEqual(response.data['payment']['fee_amount'], '150.00')
+        self.assertEqual(response.data['payment']['payment_method'], 'bank')
+        self.assertEqual(response.data['payment']['transaction_reference'], 'QHJ7K2MN01')
+        self.assertEqual(response.data['receipt']['fee_amount'], '150.00')
+
+    def test_fee_amount_only_optional(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00', 'fee_amount': '99.50'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['payment']['fee_amount'], '99.50')
+        self.assertEqual(response.data['payment']['payment_method'], 'cash')
+
+    def test_fee_amount_does_not_reduce_invoice_balance(self):
+        self.auth(self.landlord_token)
+        r1 = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '20000.00', 'fee_amount': '5000.00', 'payment_method': 'mpesa'},
+        )
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'partial')
+        remaining = self.invoice.total_amount - self.invoice.amount_paid()
+        self.assertEqual(remaining, Decimal('25000.00'))
+        r2 = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '25000.00'},
+        )
+        self.assertEqual(r2.status_code, status.HTTP_201_CREATED)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'paid')
+
+    def test_invalid_payment_method_400(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '1000.00', 'payment_method': 'bitcoin'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['payment_method'], ['Invalid choice.'])
+
+    def test_negative_fee_amount_400(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '1000.00', 'fee_amount': '-0.01'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('fee_amount', response.data)
+
+    def test_malformed_fee_amount_400(self):
+        self.auth(self.landlord_token)
+        response = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '1000.00', 'fee_amount': 'not-a-decimal'},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('fee_amount', response.data)
+
+    def test_manual_method_surfaces_on_receipt_list_filter(self):
+        self.auth(self.landlord_token)
+        pay_resp = self.client.post(
+            reverse('invoice-payments', args=[self.invoice.id]),
+            {'amount': '45000.00', 'payment_method': 'mpesa', 'transaction_reference': 'MPE-1'},
+        )
+        self.assertEqual(pay_resp.status_code, status.HTTP_201_CREATED)
+        lst = self.client.get(reverse('receipt-list'), {'method': 'mpesa'})
+        self.assertEqual(lst.status_code, status.HTTP_200_OK)
+        self.assertEqual(lst.data['count'], 1)
+        self.assertEqual(lst.data['results'][0]['payment_method'], 'mpesa')
+
 
 class ReceiptTests(APITestCase):
     def setUp(self):
@@ -1473,7 +1578,7 @@ class ReceiptEnrichmentTests(APITestCase):
 
     _EXPECTED_KEYS = frozenset({
         'id', 'payment', 'receipt_number', 'issued_at',
-        'amount', 'payment_status', 'paid_at', 'payment_method',
+        'amount', 'fee_amount', 'payment_status', 'paid_at', 'payment_method',
         'transaction_ref', 'transaction_reference',
         'invoice_id', 'invoice_number', 'invoice_status',
         'invoice_period_start', 'invoice_period_end',
@@ -1518,6 +1623,7 @@ class ReceiptEnrichmentTests(APITestCase):
         self.assertEqual(self._EXPECTED_KEYS, set(response.data.keys()))
         self.assertEqual(response.data['payment'], self.payment.id)
         self.assertEqual(response.data['amount'], '45000.00')
+        self.assertEqual(response.data['fee_amount'], '0.00')
         self.assertEqual(response.data['payment_status'], 'completed')
         self.assertEqual(response.data['payment_method'], 'card')
         self.assertEqual(response.data['transaction_ref'], 'ch_enrich_1')
@@ -1533,6 +1639,14 @@ class ReceiptEnrichmentTests(APITestCase):
         self.assertEqual(response.data['property_id'], self.prop.id)
         self.assertEqual(response.data['property_name'], self.prop.name)
         self.assertEqual(response.data['charge_type'], 'Rent')
+
+    def test_receipt_fee_amount_reflects_payment(self):
+        self.payment.fee_amount = Decimal('12.34')
+        self.payment.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.tenant_token.key}')
+        response = self.client.get(reverse('receipt-detail', args=[self.receipt.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['fee_amount'], '12.34')
 
     def test_transaction_ref_prefers_transaction_reference(self):
         self.payment.transaction_reference = 'TXN-PREF-99'

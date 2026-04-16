@@ -155,14 +155,39 @@ class InvoiceCreateSerializer(serializers.Serializer):
 
 class ManualPaymentRecordSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
+    payment_method = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    fee_amount = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        min_value=Decimal('0'),
+        default=Decimal('0'),
+    )
+    transaction_reference = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=128,
+    )
+
+    def validate_payment_method(self, value):
+        if value is None or not str(value).strip():
+            return None
+        v = str(value).strip().lower()
+        allowed = {c[0] for c in Payment.PAYMENT_METHOD_CHOICES}
+        if v not in allowed:
+            raise serializers.ValidationError('Invalid choice.')
+        return v
 
 
 class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment
-        fields = ['id', 'invoice', 'amount', 'stripe_payment_intent_id',
-                  'stripe_charge_id', 'payment_method', 'transaction_reference',
-                  'status', 'paid_at', 'created_at']
+        fields = [
+            'id', 'invoice', 'amount', 'fee_amount', 'stripe_payment_intent_id',
+            'stripe_charge_id', 'payment_method', 'transaction_reference',
+            'status', 'paid_at', 'created_at',
+        ]
         read_only_fields = ['stripe_payment_intent_id', 'stripe_charge_id', 'status', 'paid_at', 'created_at']
 
 
@@ -197,6 +222,10 @@ class ReceiptSerializer(serializers.ModelSerializer):
     amount = serializers.DecimalField(
         max_digits=10, decimal_places=2, source='payment.amount', read_only=True,
         help_text='Payment amount (decimal string).',
+    )
+    fee_amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, source='payment.fee_amount', read_only=True,
+        help_text='Per-payment fee if any; not counted toward invoice principal.',
     )
     payment_status = serializers.CharField(
         source='payment.status', read_only=True,
@@ -252,7 +281,7 @@ class ReceiptSerializer(serializers.ModelSerializer):
         model = Receipt
         fields = [
             'id', 'payment', 'receipt_number', 'issued_at',
-            'amount', 'payment_status', 'paid_at', 'payment_method',
+            'amount', 'fee_amount', 'payment_status', 'paid_at', 'payment_method',
             'transaction_ref', 'transaction_reference',
             'invoice_id', 'invoice_number', 'invoice_status',
             'invoice_period_start', 'invoice_period_end',
