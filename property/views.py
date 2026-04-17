@@ -26,7 +26,7 @@ from .models import (
 )
 from .serializers import (
     PropertySerializer, UnitSerializer, PropertyImageSerializer,
-    LeaseSerializer, PropertyAgentSerializer, TenantApplicationSerializer,
+    LeaseSerializer, LeasePartialUpdateSerializer, PropertyAgentSerializer, TenantApplicationSerializer,
     LeaseDocumentSerializer, PropertyReviewSerializer, TenantReviewSerializer,
     SavedSearchSerializer,
     TenantInvitationSerializer,
@@ -297,7 +297,19 @@ def unit_image_detail(request, unit_id, image_id):
         })
     ],
 )
-@api_view(['GET', 'POST'])
+@extend_schema(
+    methods=['PATCH'],
+    summary="Partially update a unit lease",
+    examples=[
+        OpenApiExample("Patch lease", request_only=True, value={
+            "start_date": "2026-05-01",
+            "end_date": "2028-04-30",
+            "rent_amount": "47500.00",
+            "is_active": True,
+        })
+    ],
+)
+@api_view(['GET', 'POST', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def lease_list_create(request, unit_id):
     try:
@@ -322,6 +334,16 @@ def lease_list_create(request, unit_id):
             unit.is_occupied = True
             unit.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    elif request.method == 'PATCH':
+        lease = getattr(unit, 'lease', None)
+        if not lease:
+            return Response({'detail': 'No lease for this unit.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = LeasePartialUpdateSerializer(lease, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(LeaseSerializer(lease).data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

@@ -281,6 +281,71 @@ def make_lease(unit, tenant, end_date=None):
     )
 
 
+class UnitLeaseEndpointTests(APITestCase):
+    def setUp(self):
+        self.landlord, self.landlord_token = make_user('lease_ll', 'Landlord')
+        self.other_landlord, self.other_token = make_user('lease_ol', 'Landlord')
+        self.agent, self.agent_token = make_user('lease_ag', 'Agent')
+        self.tenant, self.tenant_token = make_user('lease_tn', 'Tenant')
+        self.prop = make_property(self.landlord)
+        self.unit = make_unit(self.prop, self.landlord)
+        self.unit.is_occupied = True
+        self.unit.save()
+        self.lease = make_lease(self.unit, self.tenant)
+        PropertyAgent.objects.create(property=self.prop, agent=self.agent, appointed_by=self.landlord)
+        self.url = reverse('lease-list-create', args=[self.unit.id])
+
+    def auth(self, token):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
+
+    def test_landlord_patch_lease_returns_full_json(self):
+        self.auth(self.landlord_token)
+        new_start = date.today() + timedelta(days=10)
+        response = self.client.patch(self.url, {
+            'start_date': str(new_start),
+            'rent_amount': '50000.00',
+            'is_active': False,
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['id'], self.lease.id)
+        self.assertEqual(response.data['unit'], self.unit.id)
+        self.assertEqual(response.data['tenant'], self.tenant.id)
+        self.assertEqual(response.data['start_date'], str(new_start))
+        self.assertEqual(response.data['rent_amount'], '50000.00')
+        self.assertFalse(response.data['is_active'])
+        self.lease.refresh_from_db()
+        self.assertEqual(str(self.lease.rent_amount), '50000.00')
+        self.assertFalse(self.lease.is_active)
+
+    def test_assigned_agent_can_patch_lease(self):
+        self.auth(self.agent_token)
+        response = self.client.patch(self.url, {'end_date': str(date.today() + timedelta(days=400))}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('id', response.data)
+
+    def test_other_landlord_forbidden(self):
+        self.auth(self.other_token)
+        response = self.client.patch(self.url, {'rent_amount': '1.00'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_forbidden(self):
+        self.auth(self.tenant_token)
+        response = self.client.patch(self.url, {'rent_amount': '1.00'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_patch_no_lease_returns_404(self):
+        empty_unit = Unit.objects.create(
+            property=self.prop, name='Empty', price='1000', created_by=self.landlord, is_public=True,
+        )
+        self.auth(self.landlord_token)
+        response = self.client.patch(
+            reverse('lease-list-create', args=[empty_unit.id]),
+            {'rent_amount': '100.00'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
 class TenantApplicationTests(APITestCase):
     def setUp(self):
         self.landlord, self.landlord_token = make_user('landlord1', 'Landlord')

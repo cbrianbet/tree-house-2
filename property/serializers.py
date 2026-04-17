@@ -46,6 +46,18 @@ class LeaseSerializer(serializers.ModelSerializer):
         read_only_fields = ['unit']
 
 
+class LeasePartialUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lease
+        fields = ['start_date', 'end_date', 'rent_amount', 'is_active']
+        extra_kwargs = {
+            'start_date': {'required': False},
+            'end_date': {'required': False},
+            'rent_amount': {'required': False},
+            'is_active': {'required': False},
+        }
+
+
 class PropertyAgentSerializer(serializers.ModelSerializer):
     class Meta:
         model = PropertyAgent
