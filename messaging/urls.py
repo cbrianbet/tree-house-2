@@ -5,9 +5,11 @@ from .views import (
     conversation_detail,
     message_list_create,
     conversation_mark_read,
+    messaging_participants_lookup,
 )
 
 urlpatterns = [
+    path('participants/', messaging_participants_lookup, name='messaging-participants-lookup'),
     path('conversations/', conversation_list_create, name='conversation-list-create'),
     path('conversations/<int:pk>/', conversation_detail, name='conversation-detail'),
     path('conversations/<int:pk>/messages/', message_list_create, name='message-list-create'),

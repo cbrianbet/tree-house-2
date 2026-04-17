@@ -15,7 +15,7 @@ A property management REST API built with Django. Handles the full lifecycle of 
 | `billing` | Invoices, Stripe payments, receipts, expenses, and financial reports |
 | `maintenance` | Maintenance requests with artisan bidding |
 | `notifications` | In-app notifications and email preferences |
-| `messaging` | Polling-based conversations between users |
+| `messaging` | Polling-based conversations; role-scoped participant directory for compose (`GET /api/messaging/participants/`) |
 | `disputes` | Dispute tracking with a mediation workflow |
 | `moving` | Moving company directory, bookings, and reviews |
 | `neighborhood` | Neighborhood insights (schools, transit, safety) per property |
@@ -95,6 +95,7 @@ python manage.py test billing
 python manage.py test maintenance
 python manage.py test notifications
 python manage.py test messaging
+python manage.py test messaging.test_api_contract  # messaging API JSON schema contracts
 python manage.py test disputes
 python manage.py test moving
 python manage.py test neighborhood

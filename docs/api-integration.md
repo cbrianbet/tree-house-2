@@ -2073,9 +2073,76 @@ No body. Returns `200 { "status": "ok" }`.
 
 Polling-based messaging between users. Conversations can optionally be tied to a property.
 
+### Participant directory (compose / picker)
+
+`GET /api/messaging/participants/`
+
+Authenticated users only. Returns only users the caller is **allowed to message** (enforced in the queryset; see server `messaging/participant_access.py` for the role matrix: admin, landlord, agent, tenant, artisan, moving company).
+
+**Query params**
+
+| Param | Description |
+|-------|-------------|
+| `search` | Optional. Case-insensitive match on username, name parts, email, phone. |
+| `property` | Optional int. Restrict to owner + appointed agents + active tenants on that property. Caller must have access to the property. **Not allowed** for MovingCompany role (`400`). |
+| `limit` | Optional. Default `20`, max `100`. |
+
+**Response** `200`
+
+```json
+{
+  "results": [
+    {
+      "user_id": 3,
+      "full_name": "Jane Doe",
+      "email": "jane@example.com",
+      "phone": "+1555000100",
+      "role": "Tenant",
+      "avatar_url": null,
+      "is_active": true
+    }
+  ]
+}
+```
+
+Rate limit: **120 requests/minute** per user (HTTP 429 when exceeded).
+
+---
+
 ### List Your Conversations
 
 `GET /api/messaging/conversations/`
+
+Returns an array of conversation objects (same shape as detail).
+
+**Participant object** (each element of `participants`):
+
+| Field | Type | Notes |
+|-------|------|--------|
+| `id` | int | ConversationParticipant row id |
+| `user_id` | int | **Canonical** user id — use this in new code |
+| `user` | int | **Deprecated** in OpenAPI — same value as `user_id` (legacy alias) |
+| `username`, `first_name`, `last_name` | string | Legacy / display |
+| `full_name` | string | Display name |
+| `email`, `phone` | string | May be empty |
+| `role` | string | Role name, e.g. `Tenant` |
+| `avatar_url` | null | Reserved for future avatars |
+| `is_self` | bool | `true` when this row is the current user |
+| `last_read_at`, `joined_at` | string (ISO 8601) or null | |
+
+**`primary_recipient`:** User-centric summary for the default “other person” in the thread (first other participant by participant id), or `null` if there is no other participant.
+
+**`last_message`:** `null` if there are no messages; otherwise:
+
+| Field | Type |
+|-------|------|
+| `id` | int |
+| `sender` | int (user id) |
+| `sender_id` | int (same as `sender`) |
+| `sender_username` | string |
+| `sender_name` | string |
+| `body` | string |
+| `created_at` | string (ISO 8601) |
 
 ```json
 [
@@ -2086,20 +2153,62 @@ Polling-based messaging between users. Conversations can optionally be tied to a
     "created_by": 5,
     "created_at": "2024-03-01T09:00:00Z",
     "participants": [
-      { "id": 1, "conversation": 1, "user": 5, "last_read_at": "2024-03-02T08:00:00Z", "joined_at": "2024-03-01T09:00:00Z" },
-      { "id": 2, "conversation": 1, "user": 3, "last_read_at": null, "joined_at": "2024-03-01T09:00:00Z" }
+      {
+        "id": 1,
+        "user_id": 5,
+        "user": 5,
+        "username": "landlord1",
+        "first_name": "Jane",
+        "last_name": "Doe",
+        "full_name": "Jane Doe",
+        "email": "jane@example.com",
+        "phone": "",
+        "role": "Landlord",
+        "avatar_url": null,
+        "is_self": true,
+        "last_read_at": "2024-03-02T08:00:00Z",
+        "joined_at": "2024-03-01T09:00:00Z"
+      },
+      {
+        "id": 2,
+        "user_id": 3,
+        "user": 3,
+        "username": "tenant1",
+        "first_name": "Sam",
+        "last_name": "Renter",
+        "full_name": "Sam Renter",
+        "email": "sam@example.com",
+        "phone": "+1555000200",
+        "role": "Tenant",
+        "avatar_url": null,
+        "is_self": false,
+        "last_read_at": null,
+        "joined_at": "2024-03-01T09:00:00Z"
+      }
     ],
+    "primary_recipient": {
+      "user_id": 3,
+      "full_name": "Sam Renter",
+      "email": "sam@example.com",
+      "phone": "+1555000200",
+      "role": "Tenant",
+      "avatar_url": null
+    },
     "unread_count": 2,
     "last_message": {
       "id": 5,
-      "sender": 5,
-      "sender_name": "Jane Doe",
+      "sender": 3,
+      "sender_id": 3,
+      "sender_username": "tenant1",
+      "sender_name": "Sam Renter",
       "body": "Is the unit still available?",
       "created_at": "2024-03-02T10:00:00Z"
     }
   }
 ]
 ```
+
+**Frontend migration:** Prefer `user_id` everywhere; `user` remains for backward compatibility and is marked deprecated in `/api/docs/`.
 
 ### Start a Conversation
 
@@ -2118,6 +2227,8 @@ Polling-based messaging between users. Conversations can optionally be tied to a
 ### Get a Conversation
 
 `GET /api/messaging/conversations/<pk>/`
+
+Same JSON shape as each element of the list response.
 
 ### List Messages
 
