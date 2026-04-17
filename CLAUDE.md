@@ -54,6 +54,7 @@ python manage.py test billing
 python manage.py test maintenance
 python manage.py test notifications
 python manage.py test messaging
+python manage.py test messaging.test_api_contract   # messaging JSON schema contracts
 python manage.py test disputes
 python manage.py test moving
 python manage.py test neighborhood
@@ -109,9 +110,14 @@ notifications/      # in-app notification delivery
   migrations/       # 0001 depends on authentication.0007; 0002 adds `payment_reminder` choice
 messaging/          # polling-based user-to-user messaging
   models.py         # Conversation (property FK nullable, subject, created_by), ConversationParticipant (unique: conversation+user), Message (conversation, sender, body)
-  serializers.py    # ConversationSerializer (unread_count, last_message), MessageSerializer (sender_name)
-  views.py          # list/create conversations, detail, list/post messages, mark-read
-  urls.py           # /api/messaging/conversations/
+  serializers.py    # ConversationSerializer (participants, primary_recipient, unread_count, last_message), MessageSerializer, MessagingParticipantLookupSerializer
+  querysets.py      # conversations_queryset_for_user — annotated unread + last message, prefetch participants
+  participant_access.py  # role-safe queryset for GET /api/messaging/participants/ (compose picker)
+  contract_factories.py  # lightweight builders for messaging API contract tests
+  test_api_contract.py   # schema contract tests (list/detail/participants)
+  throttling.py     # MessagingParticipantsThrottle (directory endpoint)
+  views.py          # conversations CRUD, messages, mark-read, participants lookup
+  urls.py           # /api/messaging/participants/, /api/messaging/conversations/, …
   migrations/       # 0001 depends on authentication.0007 + property.0006
 disputes/           # dispute tracking and mediation
   models.py         # Dispute (created_by, property, unit nullable, dispute_type, status, title, description, resolved_by, resolved_at), DisputeMessage (dispute, sender, body)
@@ -281,10 +287,15 @@ any → rejected           (property owner only)
 ### Messaging (`/api/messaging/`)
 | Method | URL | Who |
 |--------|-----|-----|
-| GET/POST | `/api/messaging/conversations/` | Participants only |
+| GET | `/api/messaging/participants/` | Authenticated — role-scoped directory for composing new conversations (`search`, `property`, `limit`; throttled 120/min) |
+| GET/POST | `/api/messaging/conversations/` | List/create — list scoped to participant; create requires `participant_ids` |
 | GET | `/api/messaging/conversations/<pk>/` | Participants only |
 | GET/POST | `/api/messaging/conversations/<pk>/messages/` | Participants only |
 | POST | `/api/messaging/conversations/<pk>/read/` | Participants only |
+
+**Conversation payload (list + detail):** `participants` (each includes `user_id`, legacy `user` same int, `full_name`, `email`, `phone`, `role`, `avatar_url`, `is_self`, `last_read_at`, `joined_at`, plus `username`/`first_name`/`last_name`); `primary_recipient` (user summary or `null` if no other participant); `last_message` (`null` or object with `id`, `sender`, `sender_id`, `sender_username`, `sender_name`, `body`, `created_at`). OpenAPI marks `participants[].user` deprecated — prefer `user_id`.
+
+**Participant directory:** See `messaging/participant_access.py` for role matrix (admin vs landlord/agent/tenant vs artisan/moving company). Optional `property` intersects with owner/agents/active tenants on that property (MovingCompany callers cannot use `property`).
 
 ### Disputes (`/api/disputes/`)
 | Method | URL | Who |
@@ -411,7 +422,7 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - Each test class has a `setUp` that creates a role, user, and token, and sets client credentials
 - Use `Role.objects.get_or_create(name=role_name)` not `Role.objects.create(name=role_name)` — roles are seeded by data migration 0004 and unique constraint will fail on create
 - Use the `make_user(username, role_name)` helper pattern (see `property/tests.py`) to reduce setUp boilerplate
-- Tests live in the app's `tests.py`
+- Tests live in the app's `tests.py` (messaging also ships `test_api_contract.py` for stable response-shape checks; shared builders in `contract_factories.py`)
 - Permission boundary tests are required — test that the wrong role gets 403, not just that the right role succeeds
 
 ---
@@ -465,7 +476,10 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 ### Messaging
 - Conversations are identified by `property` + `subject` — no deduplication enforced, clients should check before creating
 - `last_read_at` on `ConversationParticipant` is updated via `POST /api/messaging/conversations/<pk>/read/`
-- `unread_count` on `ConversationSerializer` is computed dynamically: messages after `last_read_at`
+- List/detail use `conversations_queryset_for_user` — SQL annotations for `unread_count` and `last_message` (no N+1 on participants; prefetch `user` + `role`)
+- `primary_recipient`: first other participant by participant row id; `null` when viewer is the only participant
+- API contract tests: `python manage.py test messaging.test_api_contract`
+- Participant directory (`GET /api/messaging/participants/`): eligibility enforced in queryset layer in `participant_access.py`, not serializer-only
 
 ### Disputes
 - `dispute_type` choices: `rent`, `maintenance`, `noise`, `damage`, `lease`, `other`
