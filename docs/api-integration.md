@@ -677,8 +677,11 @@ python manage.py match_saved_searches --days 7  # last 7 days
 
 ### Unit Lease
 
-`GET /api/property/units/<pk>/lease/` — get active lease
+`GET /api/property/units/<pk>/lease/` — get active lease (`404` if none)
+
 `POST /api/property/units/<pk>/lease/` — create lease
+
+`PATCH /api/property/units/<pk>/lease/` — partial update of an existing lease (same auth as GET/POST: admin, property owner, or assigned agent). Writable fields only: `start_date`, `end_date`, `rent_amount`, `is_active` (all optional in the body). Returns **`200`** with the **full** lease object (same shape as GET). **`404`** if the unit has no lease.
 
 ```json
 {
@@ -691,6 +694,16 @@ python manage.py match_saved_searches --days 7  # last 7 days
 ```
 
 `unit` is set from the URL — do not include it in the body.
+
+Example PATCH body (send only fields to change):
+
+```json
+{
+  "rent_amount": "26000.00",
+  "end_date": "2025-06-30",
+  "is_active": true
+}
+```
 
 ---
 
