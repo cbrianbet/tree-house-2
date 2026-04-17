@@ -213,7 +213,7 @@ Seeded via data migrations. Roles are:
 | GET/PUT | `/api/property/units/<pk>/` | Admin, owner, assigned agent |
 | DELETE | `/api/property/units/<pk>/` | Admin, owner only |
 | GET/POST | `/api/property/units/<pk>/images/` | GET=any, POST=admin/owner/agent |
-| GET/POST | `/api/property/units/<pk>/lease/` | Admin, owner, assigned agent |
+| GET/POST/PATCH | `/api/property/units/<pk>/lease/` | Admin, owner, assigned agent — PATCH partial update (`start_date`, `end_date`, `rent_amount`, `is_active`); `200` returns full lease JSON |
 | GET/POST | `/api/property/units/<pk>/tenant-invitations/` | List/create invites — owner or assigned agent; if email matches existing Tenant, creates lease instead of invite |
 | POST | `/api/property/tenant-invitations/<pk>/resend/` | Owner or assigned agent — new token + email |
 | GET | `/api/property/units/public/` | No auth required |
