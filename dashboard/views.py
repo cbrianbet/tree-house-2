@@ -325,9 +325,157 @@ def admin_moderation_review_delete(request, pk):
 # Tenant Dashboard
 # ---------------------------------------------------------------------------
 
+def _decimal_str(value):
+    if value is None:
+        return None
+    return str(value)
+
+
+def _property_location_summary(property_obj):
+    """Human-readable location line; Property has no structured address fields yet."""
+    desc = (property_obj.description or '').strip()
+    if desc:
+        line = desc.split('\n', 1)[0].strip()
+        if len(line) > 500:
+            line = line[:497] + '...'
+        return line
+    return property_obj.name
+
+
+def _tenant_billing_snapshot(property_obj):
+    from billing.models import BillingConfig
+
+    try:
+        bc = property_obj.billing_config
+    except BillingConfig.DoesNotExist:
+        return None
+    return {
+        'rent_due_day': bc.rent_due_day,
+        'grace_period_days': bc.grace_period_days,
+        'late_fee_percentage': str(bc.late_fee_percentage),
+        'late_fee_mode': bc.late_fee_mode,
+        'late_fee_fixed_amount': _decimal_str(bc.late_fee_fixed_amount),
+    }
+
+
+def _tenant_active_lease_payload(lease, today):
+    """
+    Tenant-safe lease summary for dashboard + My Lease page.
+    Data is scoped to this lease's unit/property/owner only.
+    """
+    unit = lease.unit
+    prop = unit.property
+    landlord = prop.owner
+
+    days_remaining = (lease.end_date - today).days if lease.end_date else None
+
+    unit_detail = {
+        'floor': unit.floor or None,
+        'bedrooms': unit.bedrooms,
+        'bathrooms': unit.bathrooms,
+        'service_charge': _decimal_str(unit.service_charge),
+        'security_deposit': _decimal_str(unit.security_deposit),
+        'parking_space': unit.parking_space,
+        'parking_slots': unit.parking_slots,
+        'amenities': unit.amenities or '',
+    }
+
+    property_detail = {
+        'name': prop.name,
+        'description': prop.description or '',
+        'location_summary': _property_location_summary(prop),
+        'address': None,
+        'city': None,
+        'region': None,
+    }
+
+    email = (landlord.email or '').strip()
+    phone = (landlord.phone or '').strip()
+    landlord_payload = {
+        'user_id': landlord.id,
+        'first_name': landlord.first_name or '',
+        'last_name': landlord.last_name or '',
+        'phone': phone or None,
+        'email': email or None,
+    }
+
+    return {
+        'id': lease.id,
+        'unit_id': unit.id,
+        'property_id': prop.id,
+        'unit': unit.name,
+        'unit_name': unit.name,
+        'property': prop.name,
+        'rent_amount': str(lease.rent_amount),
+        'start_date': str(lease.start_date),
+        'end_date': str(lease.end_date) if lease.end_date else None,
+        'days_remaining': days_remaining,
+        'is_active': lease.is_active,
+        'unit_detail': unit_detail,
+        'property_detail': property_detail,
+        'landlord': landlord_payload,
+        'billing': _tenant_billing_snapshot(prop),
+    }
+
+
 @extend_schema(
     methods=['GET'],
     summary="Tenant dashboard — lease, invoices, maintenance, notifications",
+    examples=[
+        OpenApiExample(
+            "Tenant dashboard response",
+            value={
+                "active_lease": {
+                    "id": 2,
+                    "unit_id": 15,
+                    "property_id": 3,
+                    "unit": "A1",
+                    "unit_name": "A1",
+                    "property": "Sunset Apartments",
+                    "rent_amount": "25000.00",
+                    "start_date": "2024-02-01",
+                    "end_date": "2025-01-31",
+                    "days_remaining": 120,
+                    "is_active": True,
+                    "unit_detail": {
+                        "floor": "4",
+                        "bedrooms": 2,
+                        "bathrooms": 1,
+                        "service_charge": "2500.00",
+                        "security_deposit": "50000.00",
+                        "parking_space": True,
+                        "parking_slots": 1,
+                        "amenities": "Balcony; pets by agreement",
+                    },
+                    "property_detail": {
+                        "name": "Sunset Apartments",
+                        "description": "Optional long description",
+                        "location_summary": "14 Westlands Road, Nairobi",
+                        "address": None,
+                        "city": None,
+                        "region": None,
+                    },
+                    "landlord": {
+                        "user_id": 99,
+                        "first_name": "James",
+                        "last_name": "Bett",
+                        "phone": "+254700111222",
+                        "email": "james@example.com",
+                    },
+                    "billing": {
+                        "rent_due_day": 1,
+                        "grace_period_days": 3,
+                        "late_fee_percentage": "5.00",
+                        "late_fee_mode": "percentage",
+                        "late_fee_fixed_amount": None,
+                    },
+                },
+                "invoices": {"pending": 1, "overdue": 0, "next_due": None},
+                "maintenance": {"open_requests": 2},
+                "notifications": {"unread": 5},
+            },
+        ),
+    ],
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -345,17 +493,11 @@ def tenant_dashboard(request):
 
     # ── Active lease ──────────────────────────────────────────────────────────
     try:
-        lease = Lease.objects.select_related('unit__property').get(tenant=user, is_active=True)
-        days_remaining = (lease.end_date - today).days if lease.end_date else None
-        active_lease = {
-            'id': lease.id,
-            'unit': lease.unit.name,
-            'property': lease.unit.property.name,
-            'rent_amount': str(lease.rent_amount),
-            'start_date': str(lease.start_date),
-            'end_date': str(lease.end_date) if lease.end_date else None,
-            'days_remaining': days_remaining,
-        }
+        lease = Lease.objects.select_related(
+            'unit__property__owner',
+            'unit__property__billing_config',
+        ).get(tenant=user, is_active=True)
+        active_lease = _tenant_active_lease_payload(lease, today)
     except Lease.DoesNotExist:
         active_lease = None
 

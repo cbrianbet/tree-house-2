@@ -1,0 +1,10 @@
+---
+description: DRF serializers — ModelSerializer and explicit fields
+globs: "**/serializers.py"
+alwaysApply: false
+---
+
+# Serializers
+
+- Use **`ModelSerializer`** for model-backed APIs.
+- **Explicitly list `fields`** — do **not** use `fields = '__all__'`.

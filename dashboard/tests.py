@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from django.test import TestCase
 from rest_framework.test import APIClient
 from authentication.models import CustomUser, Role, MovingCompanyProfile, ArtisanProfile
+from billing.models import BillingConfig
 from property.models import Property, Unit, PropertyAgent, Lease, PropertyReview, TenantReview
 from moving.models import MovingBooking
 from dashboard.models import RoleChangeLog
@@ -218,6 +219,64 @@ class TenantDashboardTests(TestCase):
         res = self.client.get('/api/dashboard/tenant/')
         self.assertIsNotNone(res.data['active_lease'])
         self.assertEqual(res.data['active_lease']['unit'], 'A1')
+
+    def test_active_lease_includes_extended_lease_unit_property_landlord(self):
+        self.landlord.first_name = 'James'
+        self.landlord.last_name = 'Bett'
+        self.landlord.phone = '+254700111222'
+        self.landlord.email = 'james@example.com'
+        self.landlord.save()
+        self.unit.floor = '4'
+        self.unit.bedrooms = 2
+        self.unit.bathrooms = 1
+        self.unit.service_charge = '2500.00'
+        self.unit.security_deposit = '50000.00'
+        self.unit.parking_space = True
+        self.unit.parking_slots = 1
+        self.unit.amenities = 'Balcony'
+        self.unit.save()
+        self.prop.description = '14 Westlands Road\nSecond line'
+        self.prop.save()
+
+        self.client.force_authenticate(self.tenant)
+        res = self.client.get('/api/dashboard/tenant/')
+        al = res.data['active_lease']
+        self.assertEqual(al['id'], self.lease.id)
+        self.assertEqual(al['unit_id'], self.unit.id)
+        self.assertEqual(al['property_id'], self.prop.id)
+        self.assertEqual(al['unit_name'], 'A1')
+        self.assertTrue(al['is_active'])
+        self.assertEqual(al['unit_detail']['floor'], '4')
+        self.assertEqual(al['unit_detail']['bedrooms'], 2)
+        self.assertEqual(al['unit_detail']['service_charge'], '2500.00')
+        self.assertEqual(al['unit_detail']['security_deposit'], '50000.00')
+        self.assertEqual(al['unit_detail']['parking_slots'], 1)
+        self.assertEqual(al['property_detail']['name'], 'Test Property')
+        self.assertEqual(al['property_detail']['location_summary'], '14 Westlands Road')
+        self.assertEqual(al['landlord']['user_id'], self.landlord.id)
+        self.assertEqual(al['landlord']['first_name'], 'James')
+        self.assertEqual(al['landlord']['phone'], '+254700111222')
+        self.assertEqual(al['landlord']['email'], 'james@example.com')
+        self.assertIsNone(al['billing'])
+
+    def test_active_lease_billing_snapshot_when_configured(self):
+        BillingConfig.objects.create(
+            property=self.prop,
+            rent_due_day=1,
+            grace_period_days=3,
+            late_fee_percentage='5.00',
+            late_fee_mode=BillingConfig.LATE_FEE_MODE_PERCENTAGE,
+            updated_by=self.landlord,
+        )
+        self.client.force_authenticate(self.tenant)
+        res = self.client.get('/api/dashboard/tenant/')
+        bill = res.data['active_lease']['billing']
+        self.assertIsNotNone(bill)
+        self.assertEqual(bill['rent_due_day'], 1)
+        self.assertEqual(bill['grace_period_days'], 3)
+        self.assertEqual(bill['late_fee_percentage'], '5.00')
+        self.assertEqual(bill['late_fee_mode'], 'percentage')
+        self.assertIsNone(bill['late_fee_fixed_amount'])
 
     def test_non_tenant_forbidden(self):
         self.client.force_authenticate(self.landlord)

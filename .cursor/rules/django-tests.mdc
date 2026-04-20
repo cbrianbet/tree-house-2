@@ -1,0 +1,21 @@
+---
+description: Django tests — roles, tokens, boundaries, coverage expectations
+globs:
+  - "**/tests.py"
+  - "**/test_*.py"
+alwaysApply: false
+---
+
+# Tests
+
+## Setup
+
+- **`Role`**: use **`Role.objects.get_or_create(name=role_name)`** — roles are seeded; **`create`** can fail on unique constraints.
+- Reuse a **`make_user(username, role_name)`**-style helper where the app already has one (see e.g. `property/tests.py`).
+- Typical pattern: `setUp` creates role, user, token, and sets **`APIClient`** credentials.
+
+## Coverage
+
+- New endpoints: tests for **list, create, retrieve, update, delete**, and **404** where relevant.
+- **Permission boundaries**: assert wrong role gets **403**, not only that the right role succeeds.
+- Messaging: contract tests live in **`test_api_contract.py`**; use **`contract_factories.py`** builders where applicable.
