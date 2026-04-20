@@ -10,7 +10,7 @@ class MaintenanceRequest(models.Model):
         ('electrical', 'Electrical'),
         ('structural', 'Structural'),
         ('appliance', 'Appliance'),
-        ('capentry', 'Carpentry'),
+        ('carpentry', 'Carpentry'),
         ('painting', 'Painting'),
         ('masonry', 'Masonry'),
         ('other', 'Other'),
