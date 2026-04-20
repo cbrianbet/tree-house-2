@@ -101,11 +101,13 @@ python manage.py runserver
 
 The API runs at `http://localhost:8000`.
 
-| URL | Description |
-|-----|-------------|
-| `http://localhost:8000/api/docs/` | Swagger UI |
-| `http://localhost:8000/api/redoc/` | ReDoc |
+
+| URL                                 | Description             |
+| ----------------------------------- | ----------------------- |
+| `http://localhost:8000/api/docs/`   | Swagger UI              |
+| `http://localhost:8000/api/redoc/`  | ReDoc                   |
 | `http://localhost:8000/api/schema/` | OpenAPI schema download |
+
 
 If port 8000 is already in use:
 
@@ -212,10 +214,13 @@ STRIPE_WEBHOOK_SECRET=whsec_<from-stripe-cli>
 
 ## Common issues
 
-| Problem | Fix |
-|---------|-----|
-| `OperationalError: could not connect to server` | Supabase project is paused — log in and resume it |
-| `Port 8000 already in use` | Run `lsof -ti:8000 \| xargs kill -9` or use port 8001 |
-| `makemigrations` fails | Expected — write migrations by hand. See [CONTRIBUTING.md](../CONTRIBUTING.md#migrations) |
-| Test runner hangs asking to delete test DB | Use `--noinput` flag or type `yes` |
+
+| Problem                                              | Fix                                                                                                       |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `OperationalError: could not connect to server`      | Supabase project is paused — log in and resume it                                                         |
+| `Port 8000 already in use`                           | Run `lsof -ti:8000 | xargs kill -9` or use port 8001                                                      |
+| `makemigrations` fails                               | Expected — write migrations by hand. See [CONTRIBUTING.md](../CONTRIBUTING.md#migrations)                 |
+| Test runner hangs asking to delete test DB           | Use `--noinput` flag or type `yes`                                                                        |
 | `django.template.context.BaseContext` error in tests | An unhandled exception propagated out of a view — wrap `serializer.save()` in `try/except IntegrityError` |
+
+

@@ -1,5 +1,7 @@
 from datetime import date, timedelta
+from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -626,6 +628,73 @@ class LeaseDocumentTests(APITestCase):
         self.auth(self.landlord_token)
         response = self.client.post(self._doc_sign_url(doc.id))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_multipart_upload_exposes_download_url_as_file_url(self):
+        self.auth(self.landlord_token)
+        pdf = SimpleUploadedFile('lease.pdf', b'%PDF-1.4 test', content_type='application/pdf')
+        response = self.client.post(
+            self._doc_list_url(),
+            {'document_type': 'lease_agreement', 'title': 'Multipart lease', 'file': pdf},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn('/documents/%s/download/' % response.data['id'], response.data['file_url'])
+
+    def test_tenant_can_download_server_stored_file(self):
+        self.auth(self.landlord_token)
+        pdf = SimpleUploadedFile('a.pdf', b'%PDF-1.4 x', content_type='application/pdf')
+        r = self.client.post(
+            self._doc_list_url(),
+            {'document_type': 'other', 'title': 'Doc', 'file': pdf},
+            format='multipart',
+        )
+        doc_id = r.data['id']
+        download_url = reverse('lease-document-download', args=[self.lease.id, doc_id])
+        self.auth(self.tenant_token)
+        dr = self.client.get(download_url)
+        self.assertEqual(dr.status_code, status.HTTP_200_OK)
+        self.assertEqual(dr['Content-Type'], 'application/pdf')
+
+    def test_download_legacy_external_only_returns_404(self):
+        doc = self._make_doc()
+        download_url = reverse('lease-document-download', args=[self.lease.id, doc.id])
+        self.auth(self.tenant_token)
+        dr = self.client.get(download_url)
+        self.assertEqual(dr.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_invalid_file_extension_rejected(self):
+        self.auth(self.landlord_token)
+        bad = SimpleUploadedFile('x.exe', b'MZ\x00', content_type='application/octet-stream')
+        response = self.client.post(
+            self._doc_list_url(),
+            {'document_type': 'lease_agreement', 'title': 'bad', 'file': bad},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_oversize_upload_returns_413(self):
+        self.auth(self.landlord_token)
+        with patch('property.lease_document_validators.MAX_LEASE_DOCUMENT_BYTES', 50):
+            pdf = SimpleUploadedFile('huge.pdf', b'x' * 100, content_type='application/pdf')
+            response = self.client.post(
+                self._doc_list_url(),
+                {'document_type': 'lease_agreement', 'title': 'big', 'file': pdf},
+                format='multipart',
+            )
+        self.assertEqual(response.status_code, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+
+    def test_landlord_can_patch_document_title(self):
+        self.auth(self.landlord_token)
+        pdf = SimpleUploadedFile('b.pdf', b'%PDF-1.4', content_type='application/pdf')
+        r = self.client.post(
+            self._doc_list_url(),
+            {'document_type': 'notice', 'title': 'Original', 'file': pdf},
+            format='multipart',
+        )
+        detail = reverse('lease-document-detail', args=[self.lease.id, r.data['id']])
+        response = self.client.patch(detail, {'title': 'Updated title'}, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['title'], 'Updated title')
 
 
 class PropertyReviewTests(APITestCase):

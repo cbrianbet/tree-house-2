@@ -1,4 +1,7 @@
 from django.core.validators import MinValueValidator, MaxValueValidator
+import os
+import uuid
+
 from django.db import models
 
 from authentication.models import CustomUser
@@ -124,6 +127,14 @@ class TenantApplication(models.Model):
 		return f"Application by {self.applicant.username} for {self.unit}"
 
 
+def lease_document_upload_to(instance, filename):
+	"""Scoped storage path: lease_documents/<lease_id>/<uuid>.<ext> (non-guessable)."""
+	ext = os.path.splitext(filename)[1].lower()
+	if ext not in ('.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp'):
+		ext = '.bin'
+	return f'lease_documents/{instance.lease_id}/{uuid.uuid4().hex}{ext}'
+
+
 class LeaseDocument(models.Model):
 	DOCUMENT_TYPES = [
 		('lease_agreement', 'Lease Agreement'),
@@ -134,7 +145,9 @@ class LeaseDocument(models.Model):
 	lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name='documents')
 	document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPES)
 	title = models.CharField(max_length=200)
-	file_url = models.CharField(max_length=500)
+	# Legacy: external URL only. New uploads use `file`; API exposes download URL as file_url.
+	file_url = models.CharField(max_length=500, blank=True, null=True)
+	file = models.FileField(upload_to=lease_document_upload_to, blank=True, null=True)
 	uploaded_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='uploaded_documents')
 	signed_by = models.ForeignKey(
 		CustomUser, null=True, blank=True, on_delete=models.SET_NULL, related_name='signed_documents'
@@ -144,6 +157,11 @@ class LeaseDocument(models.Model):
 
 	def __str__(self):
 		return f"LeaseDocument({self.title} — {self.document_type})"
+
+	def delete(self, *args, **kwargs):
+		if self.file:
+			self.file.delete(save=False)
+		super().delete(*args, **kwargs)
 
 
 class PropertyReview(models.Model):

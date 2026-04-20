@@ -1889,7 +1889,11 @@ Returns chronological activity events for the request (request creation, bids, n
 
 ## Lease Documents
 
-Attached to a specific lease. Stores a URL to the document (no file upload — supply a pre-hosted URL).
+Attached to a specific lease. **Preferred:** upload the binary with `multipart/form-data` (`file` field). **Legacy (deprecation window):** JSON body with `file_url` pointing at a pre-hosted URL. The API never trusts client-supplied URLs for server-stored files.
+
+**Upload limits:** max **25 MB** per file. **Allowed types:** PDF, PNG, JPEG, GIF, WebP (validated by extension and `Content-Type`).
+
+**`file_url` in JSON responses:** For uploads stored by the API, `file_url` is a **server-generated absolute URL** to the authenticated download endpoint (same host as the API), not a direct bucket path. For legacy rows created with JSON `file_url` only, `file_url` remains the external URL until migrated.
 
 ### List Documents for a Lease (Owner / Agent / Tenant on that lease)
 
@@ -1903,7 +1907,7 @@ Attached to a specific lease. Stores a URL to the document (no file upload — s
     "lease": 2,
     "document_type": "lease_agreement",
     "title": "Lease Agreement — Unit A1 2024",
-    "file_url": "https://storage.example.com/docs/lease-a1-2024.pdf",
+    "file_url": "https://api.example.com/api/property/leases/2/documents/1/download/",
     "uploaded_by": 3,
     "signed_by": 5,
     "signed_at": "2024-02-01T10:00:00Z",
@@ -1916,6 +1920,41 @@ Attached to a specific lease. Stores a URL to the document (no file upload — s
 
 `POST /api/property/leases/<lease_id>/documents/`
 
+**Preferred — `multipart/form-data`**
+
+| Field           | Required | Description |
+|----------------|----------|-------------|
+| `document_type`| Yes      | One of: `lease_agreement`, `addendum`, `notice`, `other` |
+| `title`        | Yes      | Human-readable title |
+| `file`         | Yes      | Binary (PDF or image); max 25 MB |
+
+```http
+POST /api/property/leases/2/documents/
+Authorization: Token …
+Content-Type: multipart/form-data; boundary=----…
+
+------…
+Content-Disposition: form-data; name="document_type"
+
+lease_agreement
+------…
+Content-Disposition: form-data; name="title"
+
+Lease Agreement — Unit A1 2024
+------…
+Content-Disposition: form-data; name="file"; filename="lease.pdf"
+Content-Type: application/pdf
+
+<binary>
+------…--
+```
+
+```json
+// Response 201 — same shape as GET detail; file_url points at …/documents/<id>/download/
+```
+
+**Legacy — `application/json` (optional deprecation window)**
+
 ```json
 {
   "document_type": "lease_agreement",
@@ -1924,7 +1963,9 @@ Attached to a specific lease. Stores a URL to the document (no file upload — s
 }
 ```
 
-Document type choices: `lease_agreement`, `addendum`, `notice`, `inspection_report`, `other`
+Do not send both `file` and `file_url` on create.
+
+**Errors:** `400` — validation (e.g. wrong extension, invalid URL, missing file/url); `403` — not owner/agent; `413` — file larger than 25 MB (after server size limits).
 
 ### Get a Document (Owner / Agent / Tenant on that lease)
 
@@ -1937,13 +1978,28 @@ Document type choices: `lease_agreement`, `addendum`, `notice`, `inspection_repo
   "lease": 2,
   "document_type": "lease_agreement",
   "title": "Lease Agreement — Unit A1 2024",
-  "file_url": "https://storage.example.com/docs/lease-a1-2024.pdf",
+  "file_url": "https://api.example.com/api/property/leases/2/documents/1/download/",
   "uploaded_by": 3,
   "signed_by": 5,
   "signed_at": "2024-02-01T10:00:00Z",
   "created_at": "2024-02-01T08:00:00Z"
 }
 ```
+
+### Download uploaded file (Owner / Agent / Tenant on that lease)
+
+`GET /api/property/leases/<lease_id>/documents/<doc_id>/download/`
+
+Returns the stored file with `Content-Disposition: attachment` and an appropriate `Content-Type`. Requires authentication; same access rules as document detail.
+
+Returns `404` if the document only has a legacy external `file_url` (no server file) — clients should use the URL from the document JSON in that case.
+
+### Update a Document (Owner / Agent)
+
+`PUT` / `PATCH /api/property/leases/<lease_id>/documents/<doc_id>/` (partial update)
+
+- **JSON:** may update `document_type`, `title`, and for **legacy-only** documents (no uploaded `file`), `file_url`.
+- **Multipart:** send a new `file` to replace the stored object (optional together with `title` / `document_type`). You cannot set `file_url` on a document that already has a server-stored file; use a new `file` instead.
 
 ### Delete a Document (Owner / Agent only)
 

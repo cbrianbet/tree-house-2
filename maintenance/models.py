@@ -10,13 +10,16 @@ class MaintenanceRequest(models.Model):
         ('electrical', 'Electrical'),
         ('structural', 'Structural'),
         ('appliance', 'Appliance'),
+        ('carpentry', 'Carpentry'),
+        ('painting', 'Painting'),
+        ('masonry', 'Masonry'),
         ('other', 'Other'),
     ]
     PRIORITY_CHOICES = [
         ('low', 'Low'),
         ('medium', 'Medium'),
         ('high', 'High'),
-        ('emergency', 'Emergency'),
+        ('urgent', 'Urgent'),
     ]
     STATUS_CHOICES = [
         ('submitted', 'Submitted'),
