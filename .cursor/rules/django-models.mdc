@@ -1,0 +1,14 @@
+---
+description: Django models — relationships, __str__, query performance
+globs: "**/models.py"
+alwaysApply: false
+---
+
+# Django models
+
+- New **role-specific** domain entities that belong to a user: prefer a **profile table** with **`OneToOneField`** to `CustomUser` (see existing profile patterns in `authentication/`).
+- **Many-to-many with extra fields**: use an explicit **through** model (e.g. `PropertyAgent`).
+- Implement **`__str__`** on every model.
+- List/detail querysets that traverse FKs: use **`select_related`** / **`prefetch_related`** to avoid N+1 queries.
+
+For schema changes, follow migration rules in the **django-migrations** rule — this project writes migrations by hand.

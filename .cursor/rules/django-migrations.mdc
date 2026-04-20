@@ -1,0 +1,12 @@
+---
+description: Hand-written migrations — no makemigrations, safe data migrations
+globs: "**/migrations/*.py"
+alwaysApply: false
+---
+
+# Migrations
+
+- **Do not run `makemigrations`** in this project — **write migration files manually** (see `CLAUDE.md`: tooling constraints).
+- **Schema** changes and **data** changes belong in **separate** migration files.
+- **Seed / reference data**: use **data migrations**, not fixtures; prefer **`get_or_create`** so migrations are safe to re-run.
+- Name migrations descriptively, e.g. `0003_add_profile_models`, `0004_seed_roles`.

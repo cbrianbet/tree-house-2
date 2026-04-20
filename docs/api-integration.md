@@ -2793,17 +2793,61 @@ Returns a unified list of both `PropertyReview` and `TenantReview` records sorte
 
 `GET /api/dashboard/tenant/`
 
+Returns the authenticated tenant’s own data only. Top-level keys are stable: `active_lease`, `invoices`, `maintenance`, `notifications`.
+
+When `active_lease` is non-null, the object **extends** the original fields (`id`, `unit`, `property`, `rent_amount`, `start_date`, `end_date`, `days_remaining`) with identifiers, nested detail, landlord contact (for this property’s owner), and an optional billing snapshot aligned with that property’s `BillingConfig` (if configured). Older clients may ignore unknown fields.
+
+- **`unit` / `unit_name`**: Same display string (unit label). `unit_id` / `property_id` are for linking and follow-up API calls.
+- **`property_detail.location_summary`**: First line of `Property.description`, or the property name if description is empty. `address`, `city`, and `region` are reserved for future structured location fields (currently `null` until the model exposes them).
+- **`billing`**: `null` when no billing config exists for the property; otherwise `rent_due_day`, `grace_period_days`, `late_fee_percentage` (string), `late_fee_mode` (`percentage` | `fixed`), and `late_fee_fixed_amount` (string or `null`).
+
 ```json
 // Response 200
 {
   "active_lease": {
     "id": 2,
+    "unit_id": 15,
+    "property_id": 3,
     "unit": "A1",
+    "unit_name": "A1",
     "property": "Sunset Apartments",
     "rent_amount": "25000.00",
     "start_date": "2024-02-01",
     "end_date": "2025-01-31",
-    "days_remaining": 120
+    "days_remaining": 120,
+    "is_active": true,
+    "unit_detail": {
+      "floor": "4",
+      "bedrooms": 2,
+      "bathrooms": 1,
+      "service_charge": "2500.00",
+      "security_deposit": "50000.00",
+      "parking_space": true,
+      "parking_slots": 1,
+      "amenities": "Balcony; pets by agreement"
+    },
+    "property_detail": {
+      "name": "Sunset Apartments",
+      "description": "Optional long description",
+      "location_summary": "14 Westlands Road, Nairobi",
+      "address": null,
+      "city": null,
+      "region": null
+    },
+    "landlord": {
+      "user_id": 99,
+      "first_name": "James",
+      "last_name": "Bett",
+      "phone": "+254700111222",
+      "email": "james@example.com"
+    },
+    "billing": {
+      "rent_due_day": 1,
+      "grace_period_days": 3,
+      "late_fee_percentage": "5.00",
+      "late_fee_mode": "percentage",
+      "late_fee_fixed_amount": null
+    }
   },
   "invoices": {
     "pending": 1,

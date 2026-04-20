@@ -1,0 +1,29 @@
+---
+description: Tree House 2 project context — stack, env, and when to read CLAUDE.md
+alwaysApply: true
+---
+
+# Tree House 2 — project context
+
+Property management **Django REST API**: auth with multiple roles (Tenant, Landlord, Agent, Admin, Artisan, MovingCompany), property/units/leases, billing (Stripe), maintenance bidding, messaging, disputes, dashboards, monitoring.
+
+## Stack
+
+- **Django 4.2** + **DRF**, **dj-rest-auth** + **django-allauth**, **Token** auth, **drf-spectacular** (Swagger/ReDoc)
+- **PostgreSQL** (often Supabase pooler); **Stripe** for payments; **Python 3.14**, venv at `venv/`
+
+## Environment
+
+Activate venv and install deps: `source venv/bin/activate` then `pip install -r requirements.txt`. Root `.env` must define DB, email redirects, Mailgun (optional), Stripe keys — see `CLAUDE.md` for the full variable list.
+
+## Authoritative reference
+
+**`CLAUDE.md`** in the repo root is the source of truth for: API endpoint tables, status machines (maintenance, disputes, moving, alerts), app layout, Stripe/notifications/messaging behavior, and workflow rules (e.g. diagram sign-off before new models).
+
+Before large features, skim the relevant section in `CLAUDE.md`.
+
+## General
+
+- Read a file before editing it.
+- Do not add new Django apps without explicit user confirmation.
+- Keep `authentication/` boundaries clean — avoid unnecessary cross-app model imports; use patterns in `CLAUDE.md` for lazy imports and notifications.

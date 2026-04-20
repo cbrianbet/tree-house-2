@@ -1,0 +1,24 @@
+---
+description: DRF views — FBVs, permissions, OpenAPI, IntegrityError handling
+globs: "**/views.py"
+alwaysApply: false
+---
+
+# Django views (DRF)
+
+## Style
+
+- Use **function-based views** with `@api_view` and `@permission_classes` (typically `IsAuthenticated`). Avoid class-based views unless a third-party library requires them.
+- **PUT** handlers: use `partial=True` on the serializer so clients send only changed fields.
+- Factor shared list/detail logic with factory-style helpers (e.g. `_profile_list_view` / `_profile_detail_view`).
+- New endpoints: add **`@extend_schema`** with **`OpenApiExample`** — request body examples are required for new views.
+
+## Permissions
+
+- Define helpers at the **top** of `views.py`: `is_landlord`, `is_admin`, `is_agent_for`, `is_artisan`, etc., matching existing apps.
+- Use **`Role` constants** — `Role.ADMIN`, `Role.LANDLORD`, `Role.AGENT`, `Role.TENANT`, `Role.ARTISAN` — never hardcoded role name strings.
+- Agents may read/write but **must not delete**; delete is owner/admin only unless the domain says otherwise.
+
+## Python 3.14 + Django tests
+
+Uncaught exceptions (e.g. **`IntegrityError`**) in views can break the test runner. When **`serializer.save()`** can violate a unique constraint, wrap in **`try/except IntegrityError`** and return **HTTP 400** instead of letting it propagate.
