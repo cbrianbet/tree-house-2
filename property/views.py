@@ -124,7 +124,7 @@ def property_detail(request, pk):
     except Property.DoesNotExist:
         return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-    if not (is_admin(request.user) or property.owner == request.user or is_agent_for(request.user, property)) or is_tenant(request.user):
+    if not (is_admin(request.user) or is_tenant(request.user) or property.owner == request.user or is_agent_for(request.user, property)):
         return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
