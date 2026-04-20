@@ -26,7 +26,7 @@ class Migration(migrations.Migration):
                     ('electrical', 'Electrical'),
                     ('structural', 'Structural'),
                     ('appliance', 'Appliance'),
-                    ('capentry', 'Carpentry'),
+                    ('carpentry', 'Carpentry'),
                     ('painting', 'Painting'),
                     ('masonry', 'Masonry'),
                     ('other', 'Other'),
