@@ -135,6 +135,7 @@ def dispute_list_create(request):
             'New Dispute Filed',
             f"A dispute has been filed on your property '{dispute.property.name}': {dispute.title}",
             action_url=f'/api/disputes/{dispute.pk}/',
+            email_pref_key='dispute_status_change',
         )
         return Response(DisputeSerializer(dispute).data, status=status.HTTP_201_CREATED)
 
@@ -187,6 +188,7 @@ def dispute_detail(request, pk):
             'Dispute Status Updated',
             f"Your dispute '{dispute.title}' is now {new_status.replace('_', ' ')}.",
             action_url=f'/api/disputes/{dispute.pk}/',
+            email_pref_key='dispute_status_change',
         )
         return Response(DisputeSerializer(dispute).data)
 
@@ -271,6 +273,7 @@ def dispute_message_list_create(request, pk):
                         'New Message on Dispute',
                         f"{sender_name} posted a message on dispute '{dispute.title}'.",
                         action_url=f'/api/disputes/{dispute.pk}/',
+                        email_pref_key='dispute_new_message',
                     )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

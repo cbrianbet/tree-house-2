@@ -369,22 +369,35 @@ Profile is auto-created on first `GET` if it doesn't exist yet.
 `GET /api/auth/me/notifications/`
 `PATCH /api/auth/me/notifications/` — send only the flags you want to change
 
+Same preference record and field names for **all authenticated roles** (tenant, landlord, agent, artisan, moving company, admin). Product UIs may show different rows per role; unused flags remain in the API and default to `true`.
+
 ```json
 // Response 200
 {
   "email_notifications": true,
   "payment_due_reminder": true,
   "payment_received": true,
+  "invoice_issued": true,
+  "payment_receipt_sent": true,
   "maintenance_updates": true,
   "new_maintenance_request": true,
+  "maintenance_bid_received": true,
+  "maintenance_job_completed": true,
   "new_application": true,
   "application_status_change": true,
   "lease_expiry_notice": true,
+  "lease_document_uploaded": true,
+  "lease_document_signed": true,
+  "dispute_status_change": true,
+  "dispute_new_message": true,
+  "direct_message_received": true,
   "updated_at": "2024-03-01T08:00:00Z"
 }
 ```
 
 All flags default to `true`. Preferences are auto-created on first `GET`.
+
+**Email routing (backend):** In-app notifications are always created when the feature fires; optional email uses these flags (see `notifications/utils.py`). Examples: payment receipt emails use `payment_receipt_sent`; dispute status emails use `dispute_status_change`; dispute thread messages use `dispute_new_message`; direct-message emails use `direct_message_received`. Some flags (e.g. `invoice_issued`, `lease_document_uploaded`) exist for product/UI parity until every flow sends email.
 
 ---
 

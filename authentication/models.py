@@ -96,13 +96,24 @@ class NotificationPreference(models.Model):
     # Billing events
     payment_due_reminder = models.BooleanField(default=True)
     payment_received = models.BooleanField(default=True)
+    invoice_issued = models.BooleanField(default=True)
+    payment_receipt_sent = models.BooleanField(default=True)
     # Maintenance events
     maintenance_updates = models.BooleanField(default=True)
     new_maintenance_request = models.BooleanField(default=True)
+    maintenance_bid_received = models.BooleanField(default=True)
+    maintenance_job_completed = models.BooleanField(default=True)
     # Application / lease events
     new_application = models.BooleanField(default=True)
     application_status_change = models.BooleanField(default=True)
     lease_expiry_notice = models.BooleanField(default=True)
+    lease_document_uploaded = models.BooleanField(default=True)
+    lease_document_signed = models.BooleanField(default=True)
+    # Disputes
+    dispute_status_change = models.BooleanField(default=True)
+    dispute_new_message = models.BooleanField(default=True)
+    # Messaging
+    direct_message_received = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

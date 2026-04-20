@@ -247,6 +247,38 @@ class CreateNotificationUtilTests(APITestCase):
             )
             mock_send.assert_not_called()
 
+    def test_create_notification_receipt_uses_payment_receipt_sent(self):
+        NotificationPreference.objects.create(
+            user=self.user,
+            email_notifications=True,
+            payment_received=False,
+            payment_receipt_sent=True,
+        )
+        with patch('django.core.mail.send_mail') as mock_send:
+            create_notification(
+                user=self.user,
+                notification_type='payment',
+                title='Payment received',
+                body='Body.',
+                email_pref_key='payment_receipt_sent',
+            )
+            mock_send.assert_called_once()
+
+    def test_create_notification_message_respects_direct_message_received(self):
+        NotificationPreference.objects.create(
+            user=self.user,
+            email_notifications=True,
+            direct_message_received=False,
+        )
+        with patch('django.core.mail.send_mail') as mock_send:
+            create_notification(
+                user=self.user,
+                notification_type='message',
+                title='Hi',
+                body='Hello.',
+            )
+            mock_send.assert_not_called()
+
     def test_create_notification_default_action_url(self):
         """action_url defaults to empty string."""
         notification = create_notification(

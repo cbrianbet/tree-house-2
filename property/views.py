@@ -1042,6 +1042,7 @@ def tenant_review_list_create(request, property_id):
                 'New Tenant Review',
                 f"{reviewer_name} left a review for you on property '{prop.name}'.",
                 action_url=f'/api/property/properties/{prop.pk}/tenant-reviews/',
+                email_pref_key='lease_expiry_notice',
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -1253,6 +1254,7 @@ def tenant_invitation_list_create(request, unit_id):
             'New lease',
             f'You have a new lease for {unit.name} at {unit.property.name}.',
             action_url='',
+            email_pref_key='lease_document_signed',
         )
         send_existing_tenant_lease_email(existing.email, unit.property.name, unit.name)
         lease = Lease.objects.get(unit=unit)
