@@ -21,6 +21,11 @@ urlpatterns = [
     path('dashboard/', views.landlord_dashboard, name='landlord-dashboard'),
     # Lease documents
     path('leases/<int:lease_id>/documents/', views.lease_document_list_create, name='lease-document-list-create'),
+    path(
+        'leases/<int:lease_id>/documents/<int:doc_id>/download/',
+        views.lease_document_download,
+        name='lease-document-download',
+    ),
     path('leases/<int:lease_id>/documents/<int:doc_id>/', views.lease_document_detail, name='lease-document-detail'),
     path('leases/<int:lease_id>/documents/<int:doc_id>/sign/', views.lease_document_sign, name='lease-document-sign'),
     # Property reviews

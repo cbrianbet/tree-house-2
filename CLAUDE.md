@@ -220,7 +220,9 @@ Seeded via data migrations. Roles are:
 | GET/POST | `/api/property/applications/` | Landlord=own units, Tenant=own, Admin=all |
 | GET/PUT | `/api/property/applications/<pk>/` | Landlord: approve/reject — Tenant: withdraw |
 | GET | `/api/property/dashboard/` | Landlord / Admin |
-| GET/POST | `/api/property/leases/<lease_id>/documents/` | Owner/Agent=POST, Tenant on lease=GET |
+| GET/POST | `/api/property/leases/<lease_id>/documents/` | Owner/Agent=POST (multipart `file` or legacy JSON `file_url`), Tenant on lease=GET |
+| GET | `/api/property/leases/<lease_id>/documents/<doc_id>/download/` | Owner/Agent/Tenant on lease — binary; 404 if legacy external URL only |
+| GET/PUT/PATCH/DELETE | `/api/property/leases/<lease_id>/documents/<doc_id>/` | GET: same as list scope; PUT/PATCH: owner/agent; DELETE: owner/agent |
 | POST | `/api/property/leases/<lease_id>/documents/<doc_id>/sign/` | Tenant on lease only |
 | GET/POST | `/api/property/properties/<property_id>/reviews/` | GET=any auth, POST=Tenant (active/past lease) or Landlord (owns property) |
 | GET/PATCH/DELETE | `/api/property/properties/<property_id>/reviews/<review_id>/` | Reviewer or Admin |
@@ -488,9 +490,12 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - Status transitions are enforced in `_validate_status_transition()` in `disputes/views.py`
 
 ### Lease Documents
-- `file_url` is a plain `CharField(500)` — document storage is external; the API stores URLs, not files
+- **Uploads:** `LeaseDocument.file` (`FileField`) stores PDF/images under `lease_documents/<lease_id>/<uuid>.<ext>` (private disk/bucket; not guessable). **API response `file_url`** is a server-generated absolute URL to `GET …/documents/<id>/download/` (authenticated) for uploaded files; legacy rows may still expose an external URL only.
+- **Legacy:** JSON create with `file_url` (pre-hosted URL) remains supported during deprecation; do not send both `file` and `file_url` on create.
+- **Limits:** 25 MB max; types PDF, PNG, JPEG, GIF, WebP (`property/lease_document_validators.py`).
+- **Migration:** Existing rows with external `file_url` only are unchanged; download returns 404 until re-uploaded or imported server-side.
 - Signing sets `signed_by` (FK to user) and `signed_at` (timestamp) — no cryptographic signing
-- Only the tenant on the lease can sign; only the owner/agent can upload
+- Only the tenant on the lease can sign; only the owner/agent can upload/update/delete
 
 ### Search & Saved Searches
 - `GET /api/property/units/public/` supports query params: `price_min`, `price_max`, `bedrooms`, `bathrooms`, `property_type`, `amenities` (keyword), `parking=true`, `lat`+`lng`+`radius_km` (bounding-box distance filter)

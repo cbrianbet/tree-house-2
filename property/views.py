@@ -1,16 +1,19 @@
 import math
+import mimetypes
+import os
 from datetime import date, timedelta
 from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 
+from django.http import FileResponse
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from drf_spectacular.utils import extend_schema, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from .models import (
     Property,
     Unit,
@@ -784,16 +787,68 @@ def landlord_dashboard(request):
 
 # ── Lease Documents ───────────────────────────────────────────────────────────
 
+_LEASE_DOC_MULTIPART_SCHEMA = {
+    'multipart/form-data': {
+        'type': 'object',
+        'properties': {
+            'document_type': {
+                'type': 'string',
+                'enum': ['lease_agreement', 'addendum', 'notice', 'other'],
+            },
+            'title': {'type': 'string'},
+            'file': {'type': 'string', 'format': 'binary', 'description': 'PDF or image (PNG, JPEG, GIF, WebP). Max 25 MB.'},
+        },
+        'required': ['document_type', 'title', 'file'],
+    }
+}
+
+_LEASE_DOC_JSON_SCHEMA = {
+    'application/json': {
+        'type': 'object',
+        'properties': {
+            'document_type': {
+                'type': 'string',
+                'enum': ['lease_agreement', 'addendum', 'notice', 'other'],
+            },
+            'title': {'type': 'string'},
+            'file_url': {
+                'type': 'string',
+                'format': 'uri',
+                'description': 'Legacy: URL of a pre-hosted document.',
+            },
+        },
+        'required': ['document_type', 'title', 'file_url'],
+    }
+}
+
+
 @extend_schema(methods=['GET'], summary="List documents for a lease")
 @extend_schema(
     methods=['POST'],
     summary="Upload a document for a lease",
+    request={
+        **_LEASE_DOC_MULTIPART_SCHEMA,
+        **_LEASE_DOC_JSON_SCHEMA,
+    },
     examples=[
-        OpenApiExample("Upload lease document", request_only=True, value={
-            "document_type": "lease_agreement",
-            "title": "Signed Lease Agreement 2026",
-            "file_url": "https://storage.example.com/leases/doc-001.pdf",
-        })
+        OpenApiExample(
+            "Multipart upload (preferred)",
+            request_only=True,
+            value={
+                "document_type": "lease_agreement",
+                "title": "Signed Lease Agreement 2026",
+                "file": "<binary>",
+            },
+        ),
+        OpenApiExample(
+            "Legacy JSON with file_url",
+            request_only=True,
+            value={
+                "document_type": "lease_agreement",
+                "title": "Signed Lease Agreement 2026",
+                "file_url": "https://storage.example.com/leases/doc-001.pdf",
+            },
+        ),
     ],
 )
 @api_view(['GET', 'POST'])
@@ -814,13 +869,13 @@ def lease_document_list_create(request, lease_id):
 
     if request.method == 'GET':
         docs = LeaseDocument.objects.filter(lease=lease).select_related('uploaded_by', 'signed_by')
-        serializer = LeaseDocumentSerializer(docs, many=True)
+        serializer = LeaseDocumentSerializer(docs, many=True, context={'request': request})
         return Response(serializer.data)
 
     elif request.method == 'POST':
         if not (is_admin(request.user) or is_owner or is_assigned_agent):
             return Response({'detail': 'Only the landlord or assigned agent can upload documents.'}, status=status.HTTP_403_FORBIDDEN)
-        serializer = LeaseDocumentSerializer(data=request.data)
+        serializer = LeaseDocumentSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save(lease=lease, uploaded_by=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -828,8 +883,36 @@ def lease_document_list_create(request, lease_id):
 
 
 @extend_schema(methods=['GET'], summary="Get a lease document")
+@extend_schema(
+    methods=['PUT', 'PATCH'],
+    summary="Update a lease document (metadata and/or replace file)",
+    request={
+        'multipart/form-data': {
+            'type': 'object',
+            'properties': {
+                'document_type': {
+                    'type': 'string',
+                    'enum': ['lease_agreement', 'addendum', 'notice', 'other'],
+                },
+                'title': {'type': 'string'},
+                'file': {'type': 'string', 'format': 'binary'},
+            },
+        },
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'document_type': {
+                    'type': 'string',
+                    'enum': ['lease_agreement', 'addendum', 'notice', 'other'],
+                },
+                'title': {'type': 'string'},
+                'file_url': {'type': 'string', 'format': 'uri'},
+            },
+        },
+    },
+)
 @extend_schema(methods=['DELETE'], summary="Delete a lease document")
-@api_view(['GET', 'DELETE'])
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def lease_document_detail(request, lease_id, doc_id):
     try:
@@ -851,14 +934,75 @@ def lease_document_detail(request, lease_id, doc_id):
         return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
-        serializer = LeaseDocumentSerializer(doc)
+        serializer = LeaseDocumentSerializer(doc, context={'request': request})
         return Response(serializer.data)
+
+    elif request.method in ('PUT', 'PATCH'):
+        if not (is_admin(request.user) or is_owner or is_assigned_agent):
+            return Response({'detail': 'Only the landlord or assigned agent can update documents.'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = LeaseDocumentSerializer(
+            doc,
+            data=request.data,
+            partial=True,
+            context={'request': request},
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
         if not (is_admin(request.user) or is_owner or is_assigned_agent):
             return Response({'detail': 'Only the landlord or assigned agent can delete documents.'}, status=status.HTTP_403_FORBIDDEN)
         doc.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@extend_schema(
+    methods=['GET'],
+    summary="Download uploaded lease document file (auth required)",
+    responses={
+        200: OpenApiResponse(description='Binary file (Content-Disposition: attachment)'),
+        404: OpenApiResponse(description='No server-stored file (legacy external URL only)'),
+    },
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def lease_document_download(request, lease_id, doc_id):
+    try:
+        lease = Lease.objects.select_related('unit__property', 'tenant').get(pk=lease_id)
+    except Lease.DoesNotExist:
+        return Response({'detail': 'Lease not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        doc = LeaseDocument.objects.select_related('uploaded_by').get(pk=doc_id, lease=lease)
+    except LeaseDocument.DoesNotExist:
+        return Response({'detail': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    prop = lease.unit.property
+    is_owner = prop.owner == request.user
+    is_assigned_agent = is_agent_for(request.user, prop)
+    is_lease_tenant = lease.tenant == request.user
+
+    if not (is_admin(request.user) or is_owner or is_assigned_agent or is_lease_tenant):
+        return Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if not doc.file:
+        return Response(
+            {
+                'detail': (
+                    'This document has no server-stored file. Open `file_url` from the document JSON '
+                    '(legacy external link).'
+                ),
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    filename = os.path.basename(doc.file.name)
+    content_type, _ = mimetypes.guess_type(filename)
+    if not content_type:
+        content_type = 'application/octet-stream'
+    return FileResponse(doc.file.open('rb'), as_attachment=True, filename=filename, content_type=content_type)
 
 
 @extend_schema(
@@ -890,7 +1034,7 @@ def lease_document_sign(request, lease_id, doc_id):
     doc.signed_by = request.user
     doc.signed_at = timezone.now()
     doc.save()
-    return Response(LeaseDocumentSerializer(doc).data)
+    return Response(LeaseDocumentSerializer(doc, context={'request': request}).data)
 
 
 # ── Property Reviews ──────────────────────────────────────────────────────────

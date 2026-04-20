@@ -1,4 +1,8 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import URLValidator
+from django.urls import reverse
 from rest_framework import serializers
+from .lease_document_validators import validate_lease_document_upload
 from .models import (
     Property,
     Unit,
@@ -73,10 +77,86 @@ class TenantApplicationSerializer(serializers.ModelSerializer):
 
 
 class LeaseDocumentSerializer(serializers.ModelSerializer):
+    """Create with multipart `file` (preferred) or JSON `file_url` (legacy)."""
+
+    file = serializers.FileField(write_only=True, required=False, allow_null=True)
+
     class Meta:
         model = LeaseDocument
-        fields = ['id', 'lease', 'document_type', 'title', 'file_url', 'uploaded_by', 'signed_by', 'signed_at', 'created_at']
+        fields = [
+            'id', 'lease', 'document_type', 'title', 'file_url', 'file',
+            'uploaded_by', 'signed_by', 'signed_at', 'created_at',
+        ]
         read_only_fields = ['id', 'lease', 'uploaded_by', 'signed_by', 'signed_at', 'created_at']
+        extra_kwargs = {
+            'file_url': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if instance.file:
+            rel = reverse(
+                'lease-document-download',
+                kwargs={'lease_id': instance.lease_id, 'doc_id': instance.pk},
+            )
+            data['file_url'] = request.build_absolute_uri(rel) if request else rel
+        elif data.get('file_url') is None:
+            data['file_url'] = ''
+        return data
+
+    def validate_file(self, value):
+        if value is None:
+            return value
+        try:
+            validate_lease_document_upload(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        return value
+
+    def validate_file_url(self, value):
+        if value in (None, ''):
+            return value
+        validator = URLValidator()
+        try:
+            validator(value)
+        except DjangoValidationError:
+            raise serializers.ValidationError('Enter a valid URL.')
+        return value
+
+    def validate(self, attrs):
+        if self.instance is None:
+            f = attrs.get('file')
+            url = attrs.get('file_url')
+            if not f and not url:
+                raise serializers.ValidationError(
+                    'Provide either file (multipart upload) or file_url (legacy JSON with a pre-hosted URL).',
+                )
+            if f and url:
+                raise serializers.ValidationError('Provide only one of file or file_url.')
+            return attrs
+
+        if self.instance.file and attrs.get('file_url'):
+            raise serializers.ValidationError(
+                'This document is stored on the server; send a new file to replace it, or clear file_url.',
+            )
+        return attrs
+
+    def create(self, validated_data):
+        file = validated_data.pop('file', None)
+        if file:
+            validated_data['file'] = file
+            validated_data['file_url'] = None
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        new_file = validated_data.pop('file', None)
+        if new_file is not None:
+            if instance.file:
+                instance.file.delete(save=False)
+            validated_data['file'] = new_file
+            validated_data['file_url'] = None
+        return super().update(instance, validated_data)
 
 
 class PropertyReviewSerializer(serializers.ModelSerializer):
