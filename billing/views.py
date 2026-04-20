@@ -124,6 +124,7 @@ def _notify_tenant_payment_received(invoice, amount, receipt_number):
             f'Tree House'
         ),
         action_url='',
+        email_pref_key='payment_receipt_sent',
     )
 
 

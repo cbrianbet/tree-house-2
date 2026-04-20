@@ -467,11 +467,11 @@ Any uncaught exception (IntegrityError, etc.) that propagates out of a view duri
 - Performance ranking is by net income (`payments + additional_income − expenses`) for the current calendar month
 
 ### Notifications
-- `create_notification(user, type, title, body, action_url='')` lives in `notifications/utils.py` — import from there in any app that needs to trigger a notification
+- `create_notification(user, type, title, body, action_url='', *, email_pref_key=None)` lives in `notifications/utils.py` — import from there in any app that needs to trigger a notification. Optional `email_pref_key` is a `NotificationPreference` field name to gate email for that send (overrides the default `type` → flag mapping).
 - Always use a lazy import inside the view function: `from notifications.utils import create_notification` — avoids circular imports
 - Notification types: `message`, `maintenance`, `payment`, `payment_reminder`, `lease`, `dispute`, `application`, `new_listing`, `moving`, `account`
 - Wired events: dispute created → owner; dispute status change → creator; dispute message → all participants except sender; conversation created → all participants except creator; message sent → all participants except sender; tenant review → reviewed tenant; moving booking created → company; booking status change → customer; role change → affected user; `process_billing` rent reminders → tenant (`payment_reminder`); payment recorded (Stripe webhook or manual receipt) → tenant (`payment`) when `send_receipt_on_payment`
-- `_maybe_send_email()` in `notifications/utils.py` checks `NotificationPreference` before sending email with `fail_silently=True` — maps `payment_reminder` → `payment_due_reminder`, `payment` → `payment_received`
+- `_maybe_send_email()` checks `NotificationPreference` before sending email with `fail_silently=True`. Defaults (when `email_pref_key` is omitted): `payment_reminder` → `payment_due_reminder`; `payment` → `payment_received`; `message` → `direct_message_received`; `maintenance` → `maintenance_updates`; `lease` → `lease_expiry_notice`; `application` → `new_application` OR `application_status_change`; `dispute` → `dispute_status_change` OR `dispute_new_message`. Explicit keys used in code include `payment_receipt_sent` (receipt email), `dispute_status_change`, `dispute_new_message`, `lease_document_signed` (new lease), `lease_expiry_notice` (tenant review email).
 
 ### Messaging
 - Conversations are identified by `property` + `subject` — no deduplication enforced, clients should check before creating

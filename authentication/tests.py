@@ -399,6 +399,8 @@ class MeNotificationsTests(APITestCase):
         self.assertTrue(response.data['email_notifications'])
         self.assertTrue(response.data['payment_due_reminder'])
         self.assertTrue(response.data['lease_expiry_notice'])
+        self.assertTrue(response.data['invoice_issued'])
+        self.assertTrue(response.data['direct_message_received'])
 
     def test_update_preferences(self):
         response = self.client.patch(reverse('me-notifications'), {
