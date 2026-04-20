@@ -11,6 +11,7 @@ class Dispute(models.Model):
         ('noise', 'Noise'),
         ('lease_terms', 'Lease Terms'),
         ('deposit', 'Deposit'),
+        ('damage', 'Damage'),
         ('other', 'Other'),
     ]
     STATUS_CHOICES = [
