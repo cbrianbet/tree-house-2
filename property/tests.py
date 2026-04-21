@@ -655,6 +655,37 @@ class LeaseDocumentTests(APITestCase):
         self.assertEqual(dr.status_code, status.HTTP_200_OK)
         self.assertEqual(dr['Content-Type'], 'application/pdf')
 
+    def test_download_accepts_token_query_param_without_authorization_header(self):
+        """Browser navigation to file_url does not send Authorization; ?token= is supported."""
+        self.auth(self.landlord_token)
+        pdf = SimpleUploadedFile('q.pdf', b'%PDF-1.4 z', content_type='application/pdf')
+        r = self.client.post(
+            self._doc_list_url(),
+            {'document_type': 'other', 'title': 'Q', 'file': pdf},
+            format='multipart',
+        )
+        download_url = reverse('lease-document-download', args=[self.lease.id, r.data['id']])
+        self.client.credentials()
+        self.client.force_authenticate(user=None)
+        dr = self.client.get(download_url, {'token': self.landlord_token.key})
+        self.assertEqual(dr.status_code, status.HTTP_200_OK)
+
+    def test_download_rejects_invalid_query_token(self):
+        self.auth(self.landlord_token)
+        pdf = SimpleUploadedFile('q.pdf', b'%PDF-1.4 z', content_type='application/pdf')
+        r = self.client.post(
+            self._doc_list_url(),
+            {'document_type': 'other', 'title': 'Q', 'file': pdf},
+            format='multipart',
+        )
+        download_url = reverse('lease-document-download', args=[self.lease.id, r.data['id']])
+        self.client.credentials()
+        self.client.force_authenticate(user=None)
+        # Not a hex string — cannot match a real authtoken `key` (40-char hex).
+        fake_token = 'z' * 40
+        dr = self.client.get(download_url, {'token': fake_token})
+        self.assertEqual(dr.status_code, status.HTTP_401_UNAUTHORIZED)
+
     def test_download_legacy_external_only_returns_404(self):
         doc = self._make_doc()
         download_url = reverse('lease-document-download', args=[self.lease.id, doc.id])

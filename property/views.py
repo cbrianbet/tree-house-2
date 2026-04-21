@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 
 from django.http import FileResponse
 from django.utils import timezone
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
@@ -43,6 +43,7 @@ from .tenant_invite import (
     send_existing_tenant_lease_email,
 )
 from authentication.models import Role, TenantProfile, CustomUser
+from monitoring.authentication import ImpersonatingTokenAuthentication, QueryParameterTokenAuthentication
 from rest_framework.authtoken.models import Token
 
 
@@ -961,12 +962,17 @@ def lease_document_detail(request, lease_id, doc_id):
 @extend_schema(
     methods=['GET'],
     summary="Download uploaded lease document file (auth required)",
+    description=(
+        "Uses the same token as other API calls: `Authorization: Token <key>`, or for browser "
+        "navigation (new tab / `<a href>`) append `?token=<key>` because headers are not sent."
+    ),
     responses={
         200: OpenApiResponse(description='Binary file (Content-Disposition: attachment)'),
         404: OpenApiResponse(description='No server-stored file (legacy external URL only)'),
     },
 )
 @api_view(['GET'])
+@authentication_classes([QueryParameterTokenAuthentication, ImpersonatingTokenAuthentication])
 @permission_classes([IsAuthenticated])
 def lease_document_download(request, lease_id, doc_id):
     try:

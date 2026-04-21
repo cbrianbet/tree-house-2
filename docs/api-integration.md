@@ -1990,7 +1990,9 @@ Do not send both `file` and `file_url` on create.
 
 `GET /api/property/leases/<lease_id>/documents/<doc_id>/download/`
 
-Returns the stored file with `Content-Disposition: attachment` and an appropriate `Content-Type`. Requires authentication; same access rules as document detail.
+Returns the stored file with `Content-Disposition: attachment` and an appropriate `Content-Type`. Same access rules as document detail.
+
+**Authentication:** Prefer `Authorization: Token <key>` (e.g. `fetch` or API clients). For **opening the URL in a browser** (new tab, `<a href>`, `window.open`), the client cannot send headers; append **`?token=<key>`** to the download URL instead. The API does **not** include the token in `file_url` JSON — the app must add the query parameter when building a navigable link. Tokens in URLs can appear in logs and history; use HTTPS and treat links like secrets.
 
 Returns `404` if the document only has a legacy external `file_url` (no server file) — clients should use the URL from the document JSON in that case.
 
