@@ -1,5 +1,35 @@
-from rest_framework.authentication import TokenAuthentication
+from rest_framework.authentication import BaseAuthentication, TokenAuthentication
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
+
+
+class QueryParameterTokenAuthentication(BaseAuthentication):
+    """
+    Authenticates using ?token=<key> against the DRF authtoken Token model.
+
+    Browser navigations (e.g. opening a file URL in a new tab) do not send
+    Authorization headers; append the token as a query parameter for those cases.
+    Invalid tokens raise AuthenticationFailed; missing token returns None so other
+    authenticators (e.g. header-based Token auth) can run.
+    """
+
+    def authenticate(self, request):
+        key = request.query_params.get('token')
+        if not key:
+            return None
+        from rest_framework.authtoken.models import Token
+
+        try:
+            token = Token.objects.select_related('user').get(key=key)
+        except Token.DoesNotExist:
+            raise AuthenticationFailed('Invalid token.')
+        if not token.user.is_active:
+            raise AuthenticationFailed('User inactive or deleted.')
+        return (token.user, token)
+
+    def authenticate_header(self, request):
+        # Must match TokenAuthentication so APIView does not coerce 401 → 403 when
+        # authenticate_header() would otherwise be None (DRF uses authenticators[0]).
+        return 'Token'
 
 
 class ImpersonatingTokenAuthentication(TokenAuthentication):
